@@ -3,7 +3,12 @@
 # servizio docker-compose.
 #
 # I mount dei dischi qui sotto sono un ESEMPIO — vanno fatti combaciare
-# 1:1 con le voci "disks" di config.yaml (stesso path dentro al container).
+# 1:1 con le voci "disks" di config/config.yaml (stesso path dentro al
+# container).
+#
+# ./config è montato come CARTELLA (non un file): se config/config.yaml
+# non esiste al primo avvio, il container lo crea da config.example.yaml
+# e parte comunque — modificalo con i tuoi dischi reali e riavvia.
 
 services:
   ratio-guardian:
@@ -19,7 +24,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config:/app/config
       - ratio-guardian-data:/app/data
       # Esempio dischi fisici — adattare ai mount reali dell'host,
       # devono corrispondere a config.yaml "disks:"

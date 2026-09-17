@@ -27,5 +27,18 @@ USER_NAME=$(getent passwd "$PUID" | cut -d: -f1)
 mkdir -p /app/data
 chown -R "$PUID:$PGID" /app/data
 
+# /app/config è montato come CARTELLA (mai un file): se il path sull'host
+# non esiste ancora, Docker crea comunque una directory (corretto), mai
+# un file al posto sbagliato. Se manca config.yaml al suo interno,
+# seminiamo il template di default cosi' il container parte comunque
+# (con dischi placeholder) invece di crashare — l'utente lo edita
+# dall'host e riavvia.
+mkdir -p /app/config
+if [ ! -f /app/config/config.yaml ]; then
+    cp /app/config.example.yaml /app/config/config.yaml
+    echo "config/config.yaml non trovato: creato da config.example.yaml. Modificalo con i tuoi dischi reali e riavvia il container."
+fi
+chown -R "$PUID:$PGID" /app/config
+
 export RUN_AS_USER="$USER_NAME"
 exec "$@"

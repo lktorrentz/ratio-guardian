@@ -14,7 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app app
 COPY docs docs
 COPY docker docker
+COPY config.example.yaml .
 RUN chmod +x docker/entrypoint.sh
+
+# /app/config va montato come cartella (mai un file), vedi docker/entrypoint.sh:
+# se manca config.yaml al suo interno viene seminato da config.example.yaml.
+ENV CONFIG_PATH=/app/config/config.yaml
 
 EXPOSE 8080
 
