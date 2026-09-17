@@ -19,19 +19,15 @@
         let currentPath = container.dataset.initialPath || "";
 
         function render() {
-            container.innerHTML = "";
-            const header = el("div", "flex items-center justify-between mb-2");
-            const label = el("span", "font-mono text-xs text-gray-600", "/" + currentPath);
-            header.appendChild(label);
+            // La cartella corrente è sempre quella che verrà salvata al
+            // submit del form — niente pulsante di conferma intermedio
+            // ridondante, il submit stesso è già la conferma.
+            targetInput.value = currentPath;
 
-            const useBtn = el("button", "text-xs bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700", "Usa questa cartella");
-            useBtn.type = "button";
-            useBtn.onclick = function () {
-                targetInput.value = currentPath;
-                const confirmEl = container.querySelector(".tree-browser-selected");
-                if (confirmEl) confirmEl.textContent = "Selezionato: /" + currentPath;
-            };
-            header.appendChild(useBtn);
+            container.innerHTML = "";
+            const header = el("div", "mb-2");
+            const label = el("span", "font-mono text-xs text-gray-600", "Cartella selezionata: /" + currentPath);
+            header.appendChild(label);
             container.appendChild(header);
 
             const list = el("div", "border rounded divide-y max-h-56 overflow-y-auto bg-white");
@@ -67,9 +63,6 @@
             };
             actions.appendChild(mkdirBtn);
             container.appendChild(actions);
-
-            const selected = el("div", "tree-browser-selected text-xs text-gray-500 mt-1", "");
-            container.appendChild(selected);
 
             return list;
         }

@@ -56,7 +56,7 @@ class FilenameParserResolver(MediaResolverAdapter):
         self, file_path: str, content_type: Literal["movie", "tv"]
     ) -> MediaItem | None:
         guess = guessit(file_path)
-        title = self._first(guess.get("title"))
+        title = self._title_to_str(guess.get("title"))
         if not title:
             logger.warning("guessit non ha trovato un titolo in %r", file_path)
             return None
@@ -76,10 +76,21 @@ class FilenameParserResolver(MediaResolverAdapter):
 
     @staticmethod
     def _first(value):
-        """guessit ritorna una lista per i campi multi-valore (es. episodi
-        multipli in un unico file): prendiamo il primo, niente di più fine."""
+        """guessit ritorna una lista per i campi multi-valore numerici (es.
+        episodi multipli in un unico file): prendiamo il primo, niente di
+        più fine."""
         if isinstance(value, list):
             return value[0] if value else None
+        return value
+
+    @staticmethod
+    def _title_to_str(value):
+        """Per il titolo, a differenza di season/episode/year, una lista
+        rappresenta frammenti dello stesso titolo (es. ["Daredevil", "Born
+        Again"]) da riunire, non alternative da scartare — altrimenti la
+        ricerca TMDB perde precisione e rischia falsi positivi."""
+        if isinstance(value, list):
+            return " ".join(str(v) for v in value)
         return value
 
     def _search_tmdb(
