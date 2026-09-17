@@ -14,7 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app app
 COPY docs docs
 COPY docker docker
+RUN chmod +x docker/entrypoint.sh
 
 EXPOSE 8080
 
+ENTRYPOINT ["docker/entrypoint.sh"]
 CMD ["supervisord", "-c", "docker/supervisord.conf"]
