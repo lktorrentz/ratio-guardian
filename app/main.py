@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import db
+from app.api.disks import router as disks_router
 from app.config import load_settings
 
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ratio Guardian", lifespan=lifespan)
+app.include_router(disks_router)
 
 
 @app.get("/health")
