@@ -13,9 +13,19 @@
     {% endif %}
 </div>
 <p class="text-gray-500 mb-4">
-    Nessun hardlink o seeding avviene senza conferma qui — anche i match ad alta confidence aspettano la tua approvazione,
-    singola o in blocco.
+    Approvare crea un hardlink nella colonna "Azione" qui sotto e aggiunge quel torrent al client — mai un'operazione
+    già fatta in precedenza. Nessun hardlink o seeding avviene senza conferma qui, nemmeno per i match ad alta confidence.
 </p>
+
+{% if disks_missing_torrents_path %}
+<div class="bg-red-50 text-red-800 border border-red-200 rounded-lg p-4 mb-6 text-xs">
+    <strong>Attenzione:</strong> {{ disks_missing_torrents_path|map(attribute="label")|join(", ") }}
+    {{ "non ha" if disks_missing_torrents_path|length == 1 else "non hanno" }} una cartella torrent configurata.
+    Senza quella, il controllo "è già in seeding?" non può funzionare per niente su {{ "quel disco" if disks_missing_torrents_path|length == 1 else "quei dischi" }} —
+    ogni file, anche se già collegato correttamente altrove, finisce comunque qui sotto. Configurala da
+    <a href="/config/disks" class="underline">Dischi</a> prima di approvare qualcosa da lì.
+</div>
+{% endif %}
 
 {% if last_run %}
 <div class="bg-white border rounded-lg p-4 mb-6 text-xs text-gray-600 flex flex-wrap gap-x-6 gap-y-1">
@@ -32,28 +42,47 @@
         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
             <tr>
                 <th class="px-4 py-2">File locale</th>
+                <th class="px-4 py-2">Stato attuale</th>
                 <th class="px-4 py-2">Torrent candidato</th>
                 <th class="px-4 py-2">Confidence</th>
-                <th class="px-4 py-2">Stato</th>
-                <th class="px-4 py-2">Note</th>
+                <th class="px-4 py-2">Azione se approvi</th>
                 <th class="px-4 py-2">Azioni</th>
             </tr>
         </thead>
         <tbody class="divide-y">
-            {% for r in reviews %}
+            {% for rv in review_views %}
+            {% set r = rv.review %}
             <tr>
                 <td class="px-4 py-2 font-mono text-xs break-all">{{ r.candidate.media_item.file_path }}</td>
-                <td class="px-4 py-2">{{ r.candidate.name }}</td>
-                <td class="px-4 py-2 tabular-nums">{{ "%.2f"|format(r.candidate.confidence) }}</td>
-                <td class="px-4 py-2">
-                    {% if r.status == "auto_approved" %}
-                    <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">Alta confidence</span>
+                <td class="px-4 py-2 text-xs">
+                    {% if rv.already_linked_elsewhere %}
+                    <span class="text-red-700">⚠ nlink={{ rv.nlink }} — sembra già collegato altrove, verifica prima di approvare</span>
                     {% else %}
-                    <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Da verificare</span>
+                    <span class="text-gray-500">non collegato (nlink={{ rv.nlink or 0 }})</span>
                     {% endif %}
                 </td>
-                <td class="px-4 py-2 text-amber-700 text-xs">{{ r.candidate.ambiguity_reason or "" }}</td>
-                <td class="px-4 py-2 whitespace-nowrap">
+                <td class="px-4 py-2">
+                    {{ r.candidate.name }}
+                    <div class="mt-1">
+                        {% if r.status == "auto_approved" %}
+                        <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">Alta confidence</span>
+                        {% else %}
+                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Da verificare</span>
+                        {% endif %}
+                        {% if r.candidate.ambiguity_reason %}
+                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ r.candidate.ambiguity_reason }}</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td class="px-4 py-2 tabular-nums">{{ "%.2f"|format(r.candidate.confidence) }}</td>
+                <td class="px-4 py-2 font-mono text-xs break-all">
+                    {% if rv.target_path %}
+                    {{ rv.target_path }}
+                    {% else %}
+                    <span class="text-red-700 font-sans">cartella torrent non configurata sul disco — impossibile creare l'hardlink</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 whitespace-nowrap align-top">
                     <form method="post" action="/reviews/{{ r.id }}/approve" class="inline">
                         <button type="submit" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded hover:bg-emerald-700">Approva</button>
                     </form>

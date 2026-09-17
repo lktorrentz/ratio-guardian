@@ -18,7 +18,7 @@ from app.adapters.tracker.base import (
     TrackerAdapter,
 )
 from app.mediainfo_util import compute_unique_id
-from app.review import create_review_for_candidates
+from app.review import create_review_for_candidates, supersede_reviews_for_media_item
 from app.scanner import VIDEO_EXTENSIONS
 from app.seeding_index import build_seeding_index
 from app.models import Candidate, MediaItem, Tracker
@@ -61,7 +61,12 @@ def run_matching(
     for media_item in media_items:
         if _is_already_seeding(media_item, index_cache):
             totals["already_seeding"] += 1
-            logger.info("Già in seeding, salto il tracker: %r", media_item.file_path)
+            superseded = supersede_reviews_for_media_item(session, media_item.id)
+            logger.info(
+                "Già in seeding, salto il tracker: %r%s",
+                media_item.file_path,
+                f" ({superseded} vecchia/e review superata/e)" if superseded else "",
+            )
             if on_item_matched is not None:
                 on_item_matched()
             continue

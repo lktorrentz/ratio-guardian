@@ -29,11 +29,36 @@ def get_confidence_threshold(session: Session) -> float:
     return float(get_setting(session, "confidence_threshold_auto", str(DEFAULT_CONFIDENCE_THRESHOLD)))
 
 
+def supersede_reviews_for_media_item(session: Session, media_item_id: int, decided_by: str = "system") -> int:
+    """Marca come 'rejected' ogni review ancora attiva (pending/auto_approved)
+    per un dato media_item. Senza questo, ogni nuovo run che rimatcha lo
+    stesso file (o lo trova ormai già in seeding) aggiungerebbe una nuova
+    review lasciando quella vecchia in coda per sempre — mai più di una
+    valutazione attiva alla volta per lo stesso file. Ritorna quante ne
+    ha superate."""
+    stale = (
+        session.query(MatchReview)
+        .join(Candidate)
+        .filter(Candidate.media_item_id == media_item_id)
+        .filter(MatchReview.status.in_(READY_FOR_DECISION_STATUSES))
+        .all()
+    )
+    for review in stale:
+        review.status = "rejected"
+        review.decided_by = decided_by
+        review.decided_at = datetime.now(timezone.utc)
+    if stale:
+        session.commit()
+    return len(stale)
+
+
 def create_review_for_candidates(session: Session, candidates: list[Candidate]) -> MatchReview | None:
     """`candidates` deve contenere tutti i candidate relativi allo stesso
     media_item (l'output di match_media_item)."""
     if not candidates:
         return None
+
+    supersede_reviews_for_media_item(session, candidates[0].media_item_id)
 
     best = max(candidates, key=lambda c: c.confidence)
     if best.confidence <= 0.0:

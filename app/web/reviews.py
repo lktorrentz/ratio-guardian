@@ -6,6 +6,8 @@ per i match che il sistema giudica affidabili (status auto_approved) —
 vedi app/review.py. Mostra anche le esecuzioni fallite in precedenza, con
 retry singolo o in blocco."""
 
+import json
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -13,16 +15,58 @@ from sqlalchemy.orm import Session
 from app import review as review_service
 from app.deps import get_session
 from app.executor import ExecutionError
-from app.models import MatchReview, RunLog, SeedJob
+from app.models import Disk, MatchReview, MediaPath, RunLog, SeedJob
 from app.web.templates import templates
 
 router = APIRouter()
+
+
+def _review_view(review: MatchReview) -> dict:
+    """Espande una review con quello che serve a capire, a colpo d'occhio,
+    COSA farà davvero un'approvazione — richiesto esplicitamente dopo che
+    non era chiaro se/dove sarebbe stato creato un nuovo hardlink."""
+    candidate = review.candidate
+    media_item = candidate.media_item
+    disk = media_item.media_path.disk
+    file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
+
+    target_path = None
+    if disk.torrents_rel_path:
+        if candidate.folder:
+            target_path = f"/{disk.torrents_rel_path}/{candidate.folder}/  ({len(file_list)} file)"
+        elif file_list:
+            target_path = f"/{disk.torrents_rel_path}/{file_list[0]}"
+
+    return {
+        "review": review,
+        "target_path": target_path,
+        "torrents_configured": bool(disk.torrents_rel_path),
+        "nlink": media_item.nlink,
+        "already_linked_elsewhere": (media_item.nlink or 0) > 1,
+    }
+
+
+def _disks_missing_torrents_path(session: Session) -> list[Disk]:
+    """Dischi con almeno una media path abilitata ma senza torrents_rel_path
+    configurato: su questi il controllo "già in seeding" non può funzionare
+    affatto (indice sempre vuoto), quindi anche file già a posto finiscono
+    in coda — la causa più probabile se la coda sembra piena di file che
+    "dovrebbero già esistere"."""
+    return (
+        session.query(Disk)
+        .join(MediaPath)
+        .filter(MediaPath.enabled.is_(True))
+        .filter(Disk.torrents_rel_path.is_(None))
+        .distinct()
+        .all()
+    )
 
 
 @router.get("/reviews")
 def reviews_page(request: Request, session: Session = Depends(get_session)):
     reviews = review_service.list_ready_for_review(session)
     reviews.sort(key=lambda r: r.candidate.confidence, reverse=True)
+    review_views = [_review_view(r) for r in reviews]
     failed_seed_jobs = review_service.list_failed_seed_jobs(session)
     last_run = (
         session.query(RunLog)
@@ -33,7 +77,13 @@ def reviews_page(request: Request, session: Session = Depends(get_session)):
     return templates.TemplateResponse(
         request,
         "reviews.html",
-        {"reviews": reviews, "failed_seed_jobs": failed_seed_jobs, "last_run": last_run},
+        {
+            "reviews": reviews,
+            "review_views": review_views,
+            "failed_seed_jobs": failed_seed_jobs,
+            "last_run": last_run,
+            "disks_missing_torrents_path": _disks_missing_torrents_path(session),
+        },
     )
 
 
