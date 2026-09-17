@@ -1,62 +1,89 @@
 {% extends "base.html" %}
 {% block title %}Dischi — Ratio Guardian{% endblock %}
 {% block content %}
-<h1 class="text-xl font-semibold mb-1">Dischi</h1>
+<div class="flex items-center justify-between mb-1">
+    <h1 class="text-xl font-semibold">Dischi</h1>
+    <button type="button" onclick="document.getElementById('add-disk-modal').showModal()"
+            class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">
+        + Aggiungi disco
+    </button>
+</div>
 <p class="text-gray-500 mb-6">Dischi fisici configurati (root a livello di mount point).</p>
 
-{% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-sm mb-4">{{ error }}</div>{% endif %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for d in disks %}
+    <div class="bg-white border rounded-lg p-4 flex flex-col">
+        <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+                <div class="font-medium truncate">{{ d.label }}</div>
+                <div class="font-mono text-xs text-gray-500 truncate">{{ d.root_path }}</div>
+            </div>
+            <a href="/config/disks/{{ d.id }}" class="text-xs text-blue-600 hover:underline whitespace-nowrap">Gestisci</a>
+        </div>
 
-<div class="bg-white border rounded-lg overflow-hidden mb-8">
-    <table class="w-full text-left">
-        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
-            <tr>
-                <th class="px-4 py-2">Label</th>
-                <th class="px-4 py-2">Root path</th>
-                <th class="px-4 py-2">Cartella torrent</th>
-                <th class="px-4 py-2">Azioni</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y">
-            {% for d in disks %}
-            <tr>
-                <td class="px-4 py-2"><a href="/config/disks/{{ d.id }}" class="text-blue-600 hover:underline">{{ d.label }}</a></td>
-                <td class="px-4 py-2 font-mono text-xs">{{ d.root_path }}</td>
-                <td class="px-4 py-2 font-mono text-xs">{{ d.torrents_rel_path or "non configurata" }}</td>
-                <td class="px-4 py-2 space-x-2">
-                    <a href="/config/disks/{{ d.id }}" class="text-xs text-gray-600 hover:underline">Dettagli</a>
-                    <form method="post" action="/config/disks/{{ d.id }}/delete" class="inline"
-                          onsubmit="return confirm('Eliminare il disco {{ d.label }}? I media path collegati verranno eliminati.')">
-                        <button type="submit" class="text-xs text-red-600 hover:underline">Elimina</button>
-                    </form>
-                </td>
-            </tr>
-            {% else %}
-            <tr><td colspan="4" class="px-4 py-4 text-gray-400 italic">Nessun disco configurato.</td></tr>
+        <div class="text-xs text-gray-500 mt-3">
+            Cartella torrent:
+            <span class="font-mono">{{ ("/" + d.torrents_rel_path) if d.torrents_rel_path else "non configurata" }}</span>
+        </div>
+
+        <div class="text-xs text-gray-500 mt-3 mb-1">Media path:</div>
+        {% if d.media_paths %}
+        <ul class="text-xs space-y-1">
+            {% for mp in d.media_paths %}
+            <li class="flex items-center justify-between gap-2">
+                <span class="font-mono truncate">/{{ mp.relative_path }}</span>
+                <span class="text-gray-400 whitespace-nowrap">{{ mp.content_type }} · {{ "on" if mp.enabled else "off" }}</span>
+            </li>
             {% endfor %}
-        </tbody>
-    </table>
+        </ul>
+        {% else %}
+        <div class="text-xs text-gray-400 italic">Nessuna media path</div>
+        {% endif %}
+
+        <form method="post" action="/config/disks/{{ d.id }}/delete" class="mt-3 pt-3 border-t"
+              onsubmit="return confirm('Eliminare il disco {{ d.label }}? I media path collegati verranno eliminati.')">
+            <button type="submit" class="text-xs text-red-600 hover:underline">Elimina disco</button>
+        </form>
+    </div>
+    {% else %}
+    <p class="text-gray-400 italic col-span-full">Nessun disco configurato.</p>
+    {% endfor %}
 </div>
 
-<div class="bg-white border rounded-lg p-4 max-w-md">
-    <h2 class="font-medium mb-3">Aggiungi disco</h2>
-    {% if available_mounts %}
-    <form method="post" action="/config/disks" class="space-y-3">
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">Label</label>
-            <input name="label" required class="w-full border rounded px-2 py-1.5 text-sm">
+<dialog id="add-disk-modal" class="rounded-lg p-0 backdrop:bg-black/30">
+    <div class="p-5 w-80">
+        <h2 class="font-medium mb-3">Aggiungi disco</h2>
+        {% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-xs mb-3">{{ error }}</div>{% endif %}
+        {% if available_mounts %}
+        <form method="post" action="/config/disks" class="space-y-3">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Label</label>
+                <input name="label" required class="w-full border rounded px-2 py-1.5 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Mount point (da config.yaml)</label>
+                <select name="root_path" class="w-full border rounded px-2 py-1.5 text-sm">
+                    {% for mount in available_mounts %}
+                    <option value="{{ mount }}">{{ mount }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+                <button type="button" onclick="document.getElementById('add-disk-modal').close()"
+                        class="text-sm text-gray-600 px-3 py-1.5">Annulla</button>
+                <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Aggiungi</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">Tutti i mount configurati in <code>config.yaml</code> sono già assegnati a un disco.</p>
+        <div class="flex justify-end pt-3">
+            <button type="button" onclick="document.getElementById('add-disk-modal').close()" class="text-sm text-gray-600 px-3 py-1.5">Chiudi</button>
         </div>
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">Mount point (da config.yaml)</label>
-            <select name="root_path" class="w-full border rounded px-2 py-1.5 text-sm">
-                {% for mount in available_mounts %}
-                <option value="{{ mount }}">{{ mount }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Aggiungi</button>
-    </form>
-    {% else %}
-    <p class="text-sm text-gray-500">Tutti i mount configurati in <code>config.yaml</code> sono già assegnati a un disco.</p>
-    {% endif %}
-</div>
+        {% endif %}
+    </div>
+</dialog>
+
+{% if error %}
+<script>document.getElementById('add-disk-modal').showModal();</script>
+{% endif %}
 {% endblock %}
