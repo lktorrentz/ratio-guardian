@@ -72,8 +72,8 @@ Non è vincolante seguire quest'ordine alla lettera, ma rispetta le dipendenze l
 - Stack: Python/FastAPI come proposto sopra
 - Web e worker: stesso container, stesso processo supervisord (non due servizi docker-compose separati)
 - Soglia di confidence di default per l'auto-approvazione: **0.95** (`app_settings.confidence_threshold_auto`)
+- Libreria di parsing filename: **guessit** (usata in `app/adapters/media_resolver/base.py`)
 
 ## Cose esplicitamente NON ancora decise (chiedi all'utente, non assumere)
 
-- Libreria/approccio esatto per il parsing filename → titolo/anno/stagione (guessit? parsett? altro?)
 - Se e come implementare davvero lo scraping dello storico UNIT3D (è stato individuato come rischioso/fragile in fase di ricerca — l'endpoint pubblico `/api/user` dà solo statistiche aggregate, non la lista dei torrent; la lista è una pagina HTML autenticata non documentata come API)
