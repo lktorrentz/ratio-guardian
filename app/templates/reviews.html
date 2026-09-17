@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <title>Ratio Guardian — Coda di revisione</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; background: #fafafa; }
+        h1 { font-size: 1.4rem; }
+        table { border-collapse: collapse; width: 100%; background: white; }
+        th, td { border: 1px solid #ddd; padding: 0.5rem 0.75rem; text-align: left; font-size: 0.9rem; }
+        th { background: #f0f0f0; }
+        .path { font-family: monospace; word-break: break-all; }
+        .confidence { font-variant-numeric: tabular-nums; }
+        .ambiguity { color: #a15c00; font-size: 0.85rem; }
+        .actions form { display: inline; margin-right: 0.5rem; }
+        button.approve { background: #1e7a34; color: white; border: none; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer; }
+        button.reject { background: #a12a2a; color: white; border: none; padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer; }
+        .empty { color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+    <h1>Coda di revisione — match in attesa di approvazione</h1>
+    {% if reviews %}
+    <table>
+        <thead>
+            <tr>
+                <th>File locale</th>
+                <th>Torrent candidato</th>
+                <th>Confidence</th>
+                <th>Note</th>
+                <th>Azioni</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in reviews %}
+            <tr>
+                <td class="path">{{ r.candidate.media_item.file_path }}</td>
+                <td>{{ r.candidate.name }}</td>
+                <td class="confidence">{{ "%.2f"|format(r.candidate.confidence) }}</td>
+                <td class="ambiguity">{{ r.candidate.ambiguity_reason or "" }}</td>
+                <td class="actions">
+                    <form method="post" action="/reviews/{{ r.id }}/approve">
+                        <button class="approve" type="submit">Approva</button>
+                    </form>
+                    <form method="post" action="/reviews/{{ r.id }}/reject">
+                        <button class="reject" type="submit">Rifiuta</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Nessun match in attesa di revisione.</p>
+    {% endif %}
+</body>
+</html>

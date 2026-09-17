@@ -17,6 +17,7 @@ from app.adapters.tracker.base import (
     TrackerAdapter,
 )
 from app.mediainfo_util import compute_unique_id
+from app.review import create_review_for_candidates
 from app.scanner import VIDEO_EXTENSIONS
 from app.models import Candidate, MediaItem, Tracker
 
@@ -42,11 +43,18 @@ def run_matching(
 
     history = _get_history(tracker_adapter)
 
-    totals = {"media_items": 0, "candidates": 0}
+    totals = {"media_items": 0, "candidates": 0, "auto_approved": 0, "pending_review": 0}
     for media_item in media_items:
         candidates = match_media_item(session, media_item, tracker_row, tracker_adapter, history=history)
         totals["media_items"] += 1
         totals["candidates"] += len(candidates)
+
+        review = create_review_for_candidates(session, candidates)
+        if review is not None:
+            if review.status == "auto_approved":
+                totals["auto_approved"] += 1
+            elif review.status == "pending":
+                totals["pending_review"] += 1
     return totals
 
 
