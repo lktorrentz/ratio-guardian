@@ -1,0 +1,31 @@
+# Web e worker/scheduler girano nello stesso container, gestiti da
+# supervisord (vedi Dockerfile e docker/supervisord.conf) — un solo
+# servizio docker-compose.
+#
+# I mount dei dischi qui sotto sono un ESEMPIO — vanno fatti combaciare
+# 1:1 con le voci "disks" di config.yaml (stesso path dentro al container).
+
+services:
+  ratio-guardian:
+    build: .
+    container_name: ratio-guardian
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Rome
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ratio-guardian-data:/app/data
+      # Esempio dischi fisici — adattare ai mount reali dell'host,
+      # devono corrispondere a config.yaml "disks:"
+      - /mnt/disk1:/mnt/disk1
+      - /mnt/disk2:/mnt/disk2
+      - /mnt/disk3:/mnt/disk3
+
+volumes:
+  ratio-guardian-data:
