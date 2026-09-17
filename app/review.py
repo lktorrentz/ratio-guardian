@@ -10,12 +10,17 @@ plausibile (confidence 0.0 per tutti) -> nessuna riga di review, niente da
 decidere.
 """
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import Candidate, MatchReview
+from app.adapter_factory import build_torrent_client_adapter
+from app.executor import ExecutionError, execute_candidate
+from app.models import Candidate, MatchReview, TorrentClient
 from app.settings_repo import get_setting
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.95
 
@@ -51,11 +56,33 @@ def create_review_for_candidates(session: Session, candidates: list[Candidate]) 
 
 
 def approve(session: Session, review: MatchReview, decided_by: str = "user") -> MatchReview:
+    """Approva e prova subito l'esecuzione (hardlink+seed) se un client
+    torrent è configurato. Un fallimento dell'esecuzione non annulla
+    l'approvazione: resta approved con il seed_job in stato failed, e verrà
+    ritentata al prossimo run (vedi app.pipeline._execute_pending)."""
     review.status = "approved"
     review.decided_by = decided_by
     review.decided_at = datetime.now(timezone.utc)
     session.commit()
+    _try_execute(session, review)
     return review
+
+
+def _try_execute(session: Session, review: MatchReview) -> None:
+    torrent_client_row = session.query(TorrentClient).filter_by(enabled=True).first()
+    if torrent_client_row is None:
+        logger.info("Nessun client torrent configurato: esecuzione rimandata al prossimo run")
+        return
+    try:
+        adapter = build_torrent_client_adapter(torrent_client_row)
+        execute_candidate(session, review.candidate, adapter)
+    except ExecutionError:
+        logger.exception(
+            "Esecuzione immediata fallita per candidate %s (riprovata al prossimo run)",
+            review.candidate.id,
+        )
+    except Exception:
+        logger.exception("Errore inatteso nell'esecuzione immediata per candidate %s", review.candidate.id)
 
 
 def reject(session: Session, review: MatchReview, decided_by: str = "user") -> MatchReview:
