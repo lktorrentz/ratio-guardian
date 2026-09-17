@@ -203,6 +203,8 @@ def _persist_candidate(
         name=tc.name,
         size_bytes=tc.size_bytes,
         file_list_json=json.dumps(tc.file_list) if tc.file_list is not None else None,
+        folder=tc.folder,
+        download_link=tc.download_link,
         source=source,
         size_match=size_match,
         mediainfo_match=mediainfo_match,

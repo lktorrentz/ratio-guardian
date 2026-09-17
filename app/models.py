@@ -157,6 +157,8 @@ class Candidate(Base):
     name: Mapped[str] = mapped_column(nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)
     file_list_json: Mapped[str | None]
+    folder: Mapped[str | None]
+    download_link: Mapped[str | None]
     source: Mapped[str] = mapped_column(nullable=False)
     size_match: Mapped[bool | None]
     mediainfo_match: Mapped[bool | None]
@@ -203,6 +205,7 @@ class SeedJob(Base):
     hardlink_path: Mapped[str | None]
     hardlink_created_at: Mapped[datetime | None]
     torrent_added_at: Mapped[datetime | None]
+    info_hash: Mapped[str | None]
     recheck_status: Mapped[str | None]
     final_status: Mapped[str] = mapped_column(nullable=False, server_default=text("'in_progress'"))
     error_message: Mapped[str | None]

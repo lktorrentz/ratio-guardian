@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS candidate (
     name                TEXT NOT NULL,
     size_bytes          INTEGER NOT NULL,
     file_list_json      TEXT,                   -- se disponibile dall'API
+    folder              TEXT,                   -- sottocartella del pack (UNIT3D "folder"), null per file singolo
+    download_link       TEXT,                   -- URL autenticato al .torrent (necessario per add_torrent)
     source              TEXT NOT NULL CHECK (source IN ('history','catalog_search')),
     size_match          BOOLEAN,
     mediainfo_match     BOOLEAN,
@@ -98,9 +100,10 @@ CREATE TABLE IF NOT EXISTS match_review (
 CREATE TABLE IF NOT EXISTS seed_job (
     id                      INTEGER PRIMARY KEY,
     candidate_id            INTEGER NOT NULL REFERENCES candidate(id),
-    hardlink_path           TEXT,
+    hardlink_path           TEXT,                   -- file singolo: path del file; pack: cartella contenitore
     hardlink_created_at     TIMESTAMP,
     torrent_added_at        TIMESTAMP,
+    info_hash               TEXT,                   -- noto solo dopo l'aggiunta al client (mai dal tracker)
     recheck_status          TEXT CHECK (recheck_status IN ('pending','ok','failed')),
     final_status            TEXT NOT NULL DEFAULT 'in_progress'
                             CHECK (final_status IN ('in_progress','seeding','failed','rolled_back')),

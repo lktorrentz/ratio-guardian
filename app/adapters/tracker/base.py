@@ -31,6 +31,8 @@ class TorrentCandidate:
     size_bytes: int
     file_list: list[str] | None  # None se il tracker non espone la struttura file
     mediainfo_unique_id: str | None
+    folder: str | None = None  # sottocartella del pack (UNIT3D "folder"), None per file singolo
+    download_link: str | None = None  # URL autenticato al .torrent, necessario per aggiungerlo al client
 
 
 @dataclass
@@ -174,6 +176,8 @@ class Unit3dTrackerAdapter(TrackerAdapter):
             size_bytes=attrs["size"],
             file_list=[f["name"] for f in attrs.get("files") or []],
             mediainfo_unique_id=self._extract_unique_id(attrs.get("media_info")),
+            folder=attrs.get("folder"),
+            download_link=attrs.get("download_link"),
         )
 
     @classmethod
