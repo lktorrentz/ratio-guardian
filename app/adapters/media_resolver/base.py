@@ -56,7 +56,7 @@ class FilenameParserResolver(MediaResolverAdapter):
         self, file_path: str, content_type: Literal["movie", "tv"]
     ) -> MediaItem | None:
         guess = guessit(file_path)
-        title = guess.get("title")
+        title = self._first(guess.get("title"))
         if not title:
             logger.warning("guessit non ha trovato un titolo in %r", file_path)
             return None
