@@ -72,6 +72,14 @@ class FilenameParserResolver(MediaResolverAdapter):
         else:
             season = episode = None
 
+        logger.info(
+            "Risolto %r -> tmdb_id=%s%s (%r)",
+            title,
+            tmdb_id,
+            f" S{season:02d}E{episode:02d}" if season is not None and episode is not None else "",
+            file_path,
+        )
+
         return MediaItem(tmdb_id=tmdb_id, season_number=season, episode_number=episode)
 
     @staticmethod

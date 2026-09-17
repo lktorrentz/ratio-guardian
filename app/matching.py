@@ -61,6 +61,7 @@ def run_matching(
     for media_item in media_items:
         if _is_already_seeding(media_item, index_cache):
             totals["already_seeding"] += 1
+            logger.info("Già in seeding, salto il tracker: %r", media_item.file_path)
             if on_item_matched is not None:
                 on_item_matched()
             continue
@@ -75,6 +76,15 @@ def run_matching(
                 totals["auto_approved"] += 1
             elif review.status == "pending":
                 totals["pending_review"] += 1
+
+        best_confidence = max((c.confidence for c in candidates), default=None)
+        logger.info(
+            "%r: %d candidati dal tracker, confidence migliore=%s%s",
+            media_item.file_path,
+            len(candidates),
+            f"{best_confidence:.2f}" if best_confidence is not None else "n/d",
+            f" -> {review.status}" if review is not None else "",
+        )
 
         if on_item_matched is not None:
             on_item_matched()

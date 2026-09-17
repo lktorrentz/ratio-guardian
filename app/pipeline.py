@@ -59,6 +59,7 @@ def run_pipeline(
     session.add(run_log)
     session.commit()
     run_log_id = run_log.id  # letto prima di un eventuale rollback più sotto
+    logger.info("Run %s (%s) avviata", run_log_id, run_type)
 
     errors = 0
     try:
@@ -67,6 +68,7 @@ def run_pipeline(
         run_log.phase_total = run_log.items_total
         run_log.phase_done = 0
         session.commit()
+        logger.info("Fase scansione: %d file da esaminare", run_log.items_total)
 
         def _on_file_scanned() -> None:
             run_log.items_scanned = (run_log.items_scanned or 0) + 1
@@ -74,12 +76,20 @@ def run_pipeline(
             session.commit()
 
         scan_totals = scan_all_enabled(session, media_resolver, on_file_scanned=_on_file_scanned)
+        logger.info(
+            "Scansione completata: %d file, %d risolti, %d non risolti, %d già in seeding",
+            scan_totals["scanned"],
+            scan_totals["resolved"],
+            scan_totals["unresolved"],
+            scan_totals["already_seeding"],
+        )
 
         run_log.current_phase = "matching"
         matching_items = session.query(MediaItem).filter(MediaItem.tmdb_id.isnot(None)).all()
         run_log.phase_total = len(matching_items)
         run_log.phase_done = 0
         session.commit()
+        logger.info("Fase matching: %d media_item da verificare sul tracker", len(matching_items))
 
         def _on_item_matched() -> None:
             run_log.phase_done = (run_log.phase_done or 0) + 1
@@ -87,6 +97,13 @@ def run_pipeline(
 
         match_totals = run_matching(
             session, tracker_row, tracker_adapter, media_items=matching_items, on_item_matched=_on_item_matched
+        )
+        logger.info(
+            "Matching completato: %d candidati trovati, %d auto-approvati, %d in revisione, %d già in seeding",
+            match_totals["candidates"],
+            match_totals["auto_approved"],
+            match_totals["pending_review"],
+            match_totals["already_seeding"],
         )
 
         auto_seeded = 0
@@ -96,6 +113,7 @@ def run_pipeline(
             run_log.phase_total = len(executable_reviews)
             run_log.phase_done = 0
             session.commit()
+            logger.info("Fase esecuzione: %d match approvati pronti per hardlink+seed", len(executable_reviews))
 
             def _on_executed() -> None:
                 run_log.phase_done = (run_log.phase_done or 0) + 1
@@ -105,6 +123,7 @@ def run_pipeline(
                 session, torrent_client_adapter, reviews=executable_reviews, on_executed=_on_executed
             )
             errors += exec_errors
+            logger.info("Esecuzione completata: %d seedati, %d errori", auto_seeded, exec_errors)
 
         run_log.items_scanned = scan_totals["scanned"]
         run_log.matches_found = match_totals["candidates"]
@@ -125,6 +144,7 @@ def run_pipeline(
         run_log.current_phase = None
         run_log.finished_at = datetime.now(timezone.utc)
         session.commit()
+        logger.info("Run %s terminata (errori: %d)", run_log_id, run_log.errors or 0)
 
     return run_log
 

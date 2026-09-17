@@ -208,12 +208,14 @@ def _link_and_seed(
         seed_job.hardlink_path = hardlink_path or created[0]
         seed_job.hardlink_created_at = datetime.now(timezone.utc)
         session.commit()
+        logger.info("Hardlink creato per candidate %s: %s", candidate.id, seed_job.hardlink_path)
 
         info_hash = adapter.add_torrent(candidate.download_link, save_path=torrents_root, force_recheck=True)
         seed_job.info_hash = info_hash
         seed_job.torrent_added_at = datetime.now(timezone.utc)
         seed_job.recheck_status = "pending"
         session.commit()
+        logger.info("Torrent aggiunto al client (info_hash=%s), recheck in corso", info_hash)
     except Exception as exc:
         seed_job.final_status = "failed"
         seed_job.error_message = str(exc)
@@ -234,9 +236,11 @@ def reconcile_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClie
     seed_job.recheck_status = status.recheck_status
     if status.recheck_status == "ok":
         seed_job.final_status = "seeding"
+        logger.info("Recheck ok, seed_job %s in seeding (info_hash=%s)", seed_job.id, seed_job.info_hash)
     elif status.recheck_status == "failed":
         seed_job.final_status = "failed"
         seed_job.error_message = f"Recheck fallito, stato client: {status.state}"
+        logger.warning("Recheck fallito per seed_job %s: stato client %s", seed_job.id, status.state)
     session.commit()
     return seed_job
 

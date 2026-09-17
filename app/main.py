@@ -13,8 +13,11 @@ from app.api.settings import router as settings_router
 from app.api.torrent_clients import router as torrent_clients_router
 from app.api.trackers import router as trackers_router
 from app.config import load_settings
+from app.logging_config import configure_logging
 from app.pipeline import close_stale_runs
 from app.web import router as web_router
+
+configure_logging()
 
 
 @asynccontextmanager
