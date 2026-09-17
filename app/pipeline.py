@@ -26,6 +26,26 @@ logger = logging.getLogger(__name__)
 _EXECUTABLE_STATUSES = ("auto_approved", "approved")
 
 
+def close_stale_runs(session: Session) -> int:
+    """Da chiamare una volta all'avvio, prima che lo scheduler parta.
+
+    Il lock che serializza i run (app.scheduler._run_lock) è in-process:
+    non sopravvive a un riavvio del container. Qualunque run_log ancora
+    "in corso" (finished_at nullo) quando l'app riparte è quindi per forza
+    orfano — interrotto da un riavvio/crash del processo precedente, mai
+    un run realmente ancora attivo — e va chiuso come fallito invece di
+    restare bloccato per sempre nello stato live (get_current_run non
+    tornerebbe mai più None). Ritorna quante ne ha chiuse."""
+    stale_runs = session.query(RunLog).filter(RunLog.finished_at.is_(None)).all()
+    for run_log in stale_runs:
+        run_log.finished_at = datetime.now(timezone.utc)
+        run_log.errors = (run_log.errors or 0) + 1
+    session.commit()
+    if stale_runs:
+        logger.warning("Chiuse %d run orfane (interrotte da un riavvio precedente)", len(stale_runs))
+    return len(stale_runs)
+
+
 def run_pipeline(
     session: Session,
     run_type: str,

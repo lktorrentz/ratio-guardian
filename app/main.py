@@ -13,6 +13,7 @@ from app.api.settings import router as settings_router
 from app.api.torrent_clients import router as torrent_clients_router
 from app.api.trackers import router as trackers_router
 from app.config import load_settings
+from app.pipeline import close_stale_runs
 from app.web import router as web_router
 
 
@@ -25,6 +26,8 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = db.make_session_factory(engine)
+    with app.state.session_factory() as session:
+        close_stale_runs(session)
     app.state.scheduler = scheduler_module.create_scheduler(app.state.session_factory)
     yield
     app.state.scheduler.shutdown()
