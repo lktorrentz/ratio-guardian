@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     settings = load_settings()
     engine = db.make_engine(settings.db_path)
     db.apply_schema(engine)
+    db.migrate_schema(engine)
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = db.make_session_factory(engine)

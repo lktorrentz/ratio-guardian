@@ -5,11 +5,19 @@ fonte di verità per la DDL. Non usiamo Base.metadata.create_all() per non
 duplicare/divergere dallo schema: allo startup eseguiamo schema.sql
 direttamente (le CREATE TABLE sono idempotenti, IF NOT EXISTS), poi i
 modelli in app/models.py mappano quelle tabelle per l'uso ORM.
+
+CREATE TABLE IF NOT EXISTS crea le tabelle mancanti ma non tocca quelle
+già esistenti: una colonna additiva aggiunta a un modello dopo che un
+utente ha già un DB reale (es. run_log.items_total) non comparirebbe mai
+sul suo DB solo con apply_schema(). migrate_schema() colma questo gap
+confrontando le colonne attese (dai modelli SQLAlchemy) con quelle
+realmente presenti e aggiungendo quelle mancanti via ALTER TABLE — va
+chiamata sempre, ad ogni avvio, dopo apply_schema().
 """
 
 from pathlib import Path
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
@@ -40,6 +48,26 @@ def apply_schema(engine: Engine, schema_path: Path = SCHEMA_PATH) -> None:
         raw_conn.commit()
     finally:
         raw_conn.close()
+
+
+def migrate_schema(engine: Engine) -> None:
+    """Aggiunge alle tabelle già esistenti le colonne presenti nei modelli
+    ma non ancora nel DB reale (vedi nota in cima al file). Gestisce solo
+    aggiunte additive di colonne nullable senza server_default — l'unico
+    tipo di modifica che questo progetto si è finora impegnato a fare."""
+    from app.models import Base  # import qui: evita un ciclo db<->models
+
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue  # tabella nuova: apply_schema l'ha già creata per intero
+            existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing_columns:
+                    continue
+                col_type = column.type.compile(dialect=conn.dialect)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}'))
 
 
 def make_session_factory(engine: Engine) -> sessionmaker:
