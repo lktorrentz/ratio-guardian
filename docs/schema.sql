@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS run_log (
     run_type        TEXT NOT NULL CHECK (run_type IN ('scheduled','manual','bulk_import')),
     started_at      TIMESTAMP NOT NULL,
     finished_at     TIMESTAMP,
+    items_total     INTEGER,          -- precontato all'avvio del run, per lo stato live (X/Y)
     items_scanned   INTEGER DEFAULT 0,
     matches_found   INTEGER DEFAULT 0,
     auto_seeded     INTEGER DEFAULT 0,

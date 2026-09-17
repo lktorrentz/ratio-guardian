@@ -17,7 +17,7 @@ from app.adapters.tracker.base import TrackerAdapter
 from app.executor import ExecutionError, execute_candidate
 from app.matching import run_matching
 from app.models import Candidate, MatchReview, RunLog, Tracker, TorrentClient
-from app.scanner import scan_all_enabled
+from app.scanner import count_enabled_video_files, scan_all_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,18 @@ def run_pipeline(
     run_log = RunLog(run_type=run_type, started_at=datetime.now(timezone.utc))
     session.add(run_log)
     session.commit()
+    run_log_id = run_log.id  # letto prima di un eventuale rollback più sotto
 
     errors = 0
     try:
-        scan_totals = scan_all_enabled(session, media_resolver)
+        run_log.items_total = count_enabled_video_files(session)
+        session.commit()
+
+        def _on_file_scanned() -> None:
+            run_log.items_scanned = (run_log.items_scanned or 0) + 1
+            session.commit()
+
+        scan_totals = scan_all_enabled(session, media_resolver, on_file_scanned=_on_file_scanned)
         match_totals = run_matching(session, tracker_row, tracker_adapter)
 
         auto_seeded = 0
@@ -54,7 +62,13 @@ def run_pipeline(
         run_log.pending_review = match_totals["pending_review"]
         run_log.errors = errors
     except Exception:
-        logger.exception("Run %s fallita", run_log.id)
+        # La sessione può essere in stato "rollback pending" dopo un
+        # fallimento di flush (es. un IntegrityError durante lo scan):
+        # senza rollback qui, anche solo leggere run_log.errors sotto
+        # solleverebbe PendingRollbackError, mascherando l'errore vero.
+        session.rollback()
+        logger.exception("Run %s fallita", run_log_id)
+        run_log = session.get(RunLog, run_log_id)
         run_log.errors = errors + 1
         raise
     finally:
@@ -91,6 +105,12 @@ def _execute_pending(session: Session, torrent_client_adapter: TorrentClientAdap
         else:
             seeded += 1
     return seeded, errors
+
+
+def get_current_run(session: Session) -> RunLog | None:
+    """Il run in corso (started_at impostato, finished_at ancora nullo),
+    se c'è. Usato sia per lo stato live sia per evitare run sovrapposti."""
+    return session.query(RunLog).filter(RunLog.finished_at.is_(None)).order_by(RunLog.id.desc()).first()
 
 
 def build_and_run_pipeline(session: Session, run_type: str) -> RunLog | None:

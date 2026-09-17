@@ -223,6 +223,7 @@ class RunLog(Base):
     run_type: Mapped[str] = mapped_column(nullable=False)
     started_at: Mapped[datetime] = mapped_column(nullable=False)
     finished_at: Mapped[datetime | None]
+    items_total: Mapped[int | None]
     items_scanned: Mapped[int | None] = mapped_column(server_default=text("0"))
     matches_found: Mapped[int | None] = mapped_column(server_default=text("0"))
     auto_seeded: Mapped[int | None] = mapped_column(server_default=text("0"))

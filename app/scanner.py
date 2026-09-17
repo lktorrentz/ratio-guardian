@@ -7,6 +7,7 @@ la differenza tra i due è solo nel trigger/volume, non nel motore.
 
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,14 +28,28 @@ def iter_video_files(root: str):
                 yield os.path.join(dirpath, name)
 
 
+def count_enabled_video_files(session: Session) -> int:
+    """Precount usato per lo stato live di una run (X/Y scansionati) —
+    stesso attraversamento di iter_video_files, senza stat/resolve."""
+    media_paths = session.query(MediaPath).filter(MediaPath.enabled.is_(True)).all()
+    total = 0
+    for media_path in media_paths:
+        abs_path = os.path.join(media_path.disk.root_path, media_path.relative_path)
+        total += sum(1 for _ in iter_video_files(abs_path))
+    return total
+
+
 def scan_media_path(
     session: Session,
     media_path: MediaPath,
     disk_root_path: str,
     resolver: MediaResolverAdapter,
+    on_file_scanned: Callable[[], None] | None = None,
 ) -> dict[str, int]:
     """Scansiona una singola MediaPath, upsert media_item per ogni file
-    trovato. Ritorna i contatori (scanned/resolved/unresolved)."""
+    trovato. Ritorna i contatori (scanned/resolved/unresolved). Committa
+    dopo ogni file (non solo alla fine) cosi' on_file_scanned puo' essere
+    usato per aggiornare uno stato live visibile da un'altra sessione."""
     counts = {"scanned": 0, "resolved": 0, "unresolved": 0}
     abs_path = os.path.join(disk_root_path, media_path.relative_path)
 
@@ -74,17 +89,26 @@ def scan_media_path(
         else:
             counts["unresolved"] += 1
 
-    session.commit()
+        session.commit()
+        if on_file_scanned is not None:
+            on_file_scanned()
+
     return counts
 
 
-def scan_all_enabled(session: Session, resolver: MediaResolverAdapter) -> dict[str, int]:
+def scan_all_enabled(
+    session: Session,
+    resolver: MediaResolverAdapter,
+    on_file_scanned: Callable[[], None] | None = None,
+) -> dict[str, int]:
     """Scansiona tutte le MediaPath abilitate su tutti i dischi configurati."""
     media_paths = session.query(MediaPath).filter(MediaPath.enabled.is_(True)).all()
 
     totals = {"scanned": 0, "resolved": 0, "unresolved": 0}
     for media_path in media_paths:
-        counts = scan_media_path(session, media_path, media_path.disk.root_path, resolver)
+        counts = scan_media_path(
+            session, media_path, media_path.disk.root_path, resolver, on_file_scanned=on_file_scanned
+        )
         for key in totals:
             totals[key] += counts[key]
     return totals

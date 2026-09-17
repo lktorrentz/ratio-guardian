@@ -17,9 +17,13 @@ SCHEMA_PATH = Path(__file__).resolve().parent.parent / "docs" / "schema.sql"
 
 
 @event.listens_for(Engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+def _configure_sqlite(dbapi_connection, _connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL invece del rollback journal di default: i lettori (es. il
+    # polling dello stato live di una run) non vengono bloccati da uno
+    # scrittore concorrente (lo scan/matching in corso).
+    cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
 
 

@@ -27,9 +27,11 @@
             {% endfor %}
         </div>
     </nav>
+    <div id="run-status-banner" hidden class="bg-blue-50 text-blue-800 text-xs px-4 py-2 border-b border-blue-100"></div>
     <main class="max-w-6xl mx-auto px-4 py-8">
         {% block content %}{% endblock %}
     </main>
     <script src="/static/tree_browser.js"></script>
+    <script src="/static/run_status.js"></script>
 </body>
 </html>
