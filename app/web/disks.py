@@ -80,7 +80,16 @@ def disk_detail_page(disk_id: int, request: Request, session: Session = Depends(
 
 
 @router.post("/disks/{disk_id}/torrents-path")
-def set_torrents_path_page(disk_id: int, torrents_rel_path: str = Form(...), session: Session = Depends(get_session)):
+def set_torrents_path_page(
+    disk_id: int,
+    # Form("") non Form(...): un hidden input popolato dal tree browser che
+    # arriva vuoto (utente non ha cliccato "Usa questa cartella") viene
+    # trattato da FastAPI/Starlette come campo MANCANTE, non come stringa
+    # vuota, se il default è Form(...) — produce un 422 grezzo invece del
+    # comportamento voluto ("nessuna cartella torrent configurata").
+    torrents_rel_path: str = Form(""),
+    session: Session = Depends(get_session),
+):
     disk = session.get(Disk, disk_id)
     if disk is not None:
         disk.torrents_rel_path = torrents_rel_path or None
@@ -91,17 +100,20 @@ def set_torrents_path_page(disk_id: int, torrents_rel_path: str = Form(...), ses
 @router.post("/disks/{disk_id}/media-paths")
 def create_media_path_page(
     disk_id: int,
-    relative_path: str = Form(...),
+    relative_path: str = Form(""),  # vedi nota in set_torrents_path_page
     content_type: str = Form(...),
     session: Session = Depends(get_session),
 ):
     disk = session.get(Disk, disk_id)
     url = f"/config/disks/{disk_id}"
     if disk is not None:
-        try:
-            create_media_path_row(session, disk, relative_path, content_type)
-        except (MediaPathValidationError, MediaPathConflictError) as exc:
-            url += f"?error={quote(str(exc))}"
+        if not relative_path.strip():
+            url += f"?error={quote('Seleziona una cartella con il tree browser prima di aggiungere la media path')}"
+        else:
+            try:
+                create_media_path_row(session, disk, relative_path, content_type)
+            except (MediaPathValidationError, MediaPathConflictError) as exc:
+                url += f"?error={quote(str(exc))}"
     return RedirectResponse(url=url, status_code=303)
 
 
