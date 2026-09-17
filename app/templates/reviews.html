@@ -69,4 +69,47 @@
 {% else %}
 <p class="text-gray-400 italic">Nessun match in attesa di conferma.</p>
 {% endif %}
+
+<div class="flex items-center justify-between mt-10 mb-1">
+    <h2 class="text-lg font-semibold">Esecuzioni fallite</h2>
+    {% if failed_seed_jobs %}
+    <form method="post" action="/reviews/failed/retry-all">
+        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">
+            Riprova tutte ({{ failed_seed_jobs|length }})
+        </button>
+    </form>
+    {% endif %}
+</div>
+<p class="text-gray-500 mb-4">Hardlink/aggiunta al client andati storti in un tentativo precedente — mai ritentati da soli.</p>
+
+{% if failed_seed_jobs %}
+<div class="bg-white border rounded-lg overflow-hidden">
+    <table class="w-full text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">File locale</th>
+                <th class="px-4 py-2">Torrent</th>
+                <th class="px-4 py-2">Errore</th>
+                <th class="px-4 py-2">Azioni</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for job in failed_seed_jobs %}
+            <tr>
+                <td class="px-4 py-2 font-mono text-xs break-all">{{ job.candidate.media_item.file_path }}</td>
+                <td class="px-4 py-2">{{ job.candidate.name }}</td>
+                <td class="px-4 py-2 text-red-700 text-xs break-all">{{ job.error_message or "" }}</td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    <form method="post" action="/reviews/failed/{{ job.id }}/retry" class="inline">
+                        <button type="submit" class="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700">Riprova</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-gray-400 italic">Nessuna esecuzione fallita.</p>
+{% endif %}
 {% endblock %}

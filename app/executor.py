@@ -225,6 +225,64 @@ def _link_and_seed(
     return seed_job
 
 
+def retry_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAdapter) -> SeedJob:
+    """Ritenta un seed_job failed, riprendendo dal punto giusto invece di
+    ripartire ciecamente da execute_candidate() (che tratterebbe un
+    hardlink già creato come "già in seeding" e non farebbe nulla, anche
+    se il torrent non è mai stato aggiunto al client — il fallimento più
+    comune, es. client irraggiungibile al momento della prima esecuzione).
+
+    - hardlink_path nullo -> mai arrivato a creare l'hardlink, si riparte
+      da zero con execute_candidate().
+    - hardlink_path presente, info_hash nullo -> hardlink ok, torrent mai
+      aggiunto: si riprende da lì.
+    - info_hash già presente -> probabilmente solo il recheck non è mai
+      stato confermato: si reinterroga il client."""
+    if seed_job.final_status != "failed":
+        raise ExecutionError(f"SeedJob {seed_job.id} non è in stato failed (attuale: {seed_job.final_status})")
+
+    candidate = seed_job.candidate
+
+    if not seed_job.hardlink_path:
+        logger.info("Retry seed_job %s: hardlink mai creato, riparto da zero", seed_job.id)
+        result = execute_candidate(session, candidate, adapter)
+        if result is None:
+            raise ExecutionError("Il file risulta già in seeding: nessuna nuova esecuzione necessaria")
+        return result
+
+    if seed_job.info_hash:
+        logger.info("Retry seed_job %s: hardlink e torrent già presenti, reinterrogo il client", seed_job.id)
+        return reconcile_seed_job(session, seed_job, adapter)
+
+    logger.info("Retry seed_job %s: hardlink presente, riprendo dall'aggiunta al client", seed_job.id)
+    if not candidate.download_link:
+        seed_job.error_message = "Candidate senza download_link: impossibile aggiungere il torrent al client"
+        session.commit()
+        raise ExecutionError(seed_job.error_message)
+
+    disk = candidate.media_item.media_path.disk
+    try:
+        torrents_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
+    except ScopeViolation as exc:
+        raise ExecutionError(str(exc)) from exc
+
+    try:
+        info_hash = adapter.add_torrent(candidate.download_link, save_path=torrents_root, force_recheck=True)
+        seed_job.info_hash = info_hash
+        seed_job.torrent_added_at = datetime.now(timezone.utc)
+        seed_job.recheck_status = "pending"
+        seed_job.final_status = "in_progress"
+        seed_job.error_message = None
+        session.commit()
+        logger.info("Retry riuscito: torrent aggiunto (info_hash=%s) per seed_job %s", info_hash, seed_job.id)
+    except Exception as exc:
+        seed_job.error_message = str(exc)
+        session.commit()
+        raise ExecutionError(str(exc)) from exc
+
+    return seed_job
+
+
 def reconcile_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAdapter) -> SeedJob:
     """Aggiorna recheck_status/final_status interrogando lo stato reale nel
     client. Il recheck è asincrono lato client: va richiamata finché non
