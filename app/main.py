@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app import db, scheduler as scheduler_module
 from app.api.disks import router as disks_router
@@ -30,6 +32,7 @@ app.include_router(reviews_api_router)
 app.include_router(runs_router)
 app.include_router(settings_router)
 app.include_router(web_router)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 
 
 @app.get("/health")

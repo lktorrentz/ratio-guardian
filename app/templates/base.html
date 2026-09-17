@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full bg-gray-50">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Ratio Guardian{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="h-full text-gray-900 text-sm">
+    {% set nav_items = [
+        ("/", "Dashboard"),
+        ("/config/disks", "Dischi"),
+        ("/config/trackers", "Tracker"),
+        ("/config/torrent-clients", "Client torrent"),
+        ("/config/settings", "Impostazioni"),
+        ("/reviews", "Revisione"),
+        ("/runs", "Storico run"),
+    ] %}
+    <nav class="bg-slate-900 text-white">
+        <div class="max-w-6xl mx-auto px-4 flex items-center h-14 gap-6">
+            <span class="font-semibold tracking-tight">Ratio Guardian</span>
+            {% for href, label in nav_items %}
+            <a href="{{ href }}"
+               class="{% if request.url.path == href or (href != '/' and request.url.path.startswith(href)) %}text-white font-medium{% else %}text-slate-400 hover:text-white{% endif %}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+    </nav>
+    <main class="max-w-6xl mx-auto px-4 py-8">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/tree_browser.js"></script>
+</body>
+</html>
