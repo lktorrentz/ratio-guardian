@@ -6,6 +6,7 @@ Ogni run produce una riga in run_log con i contatori aggregati.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ from app.adapters.torrent_client.base import TorrentClientAdapter
 from app.adapters.tracker.base import TrackerAdapter
 from app.executor import ExecutionError, execute_candidate
 from app.matching import run_matching
-from app.models import Candidate, MatchReview, RunLog, Tracker, TorrentClient
+from app.models import Candidate, MatchReview, MediaItem, RunLog, Tracker, TorrentClient
 from app.scanner import count_enabled_video_files, scan_all_enabled
 
 logger = logging.getLogger(__name__)
@@ -61,19 +62,48 @@ def run_pipeline(
 
     errors = 0
     try:
+        run_log.current_phase = "scanning"
         run_log.items_total = count_enabled_video_files(session)
+        run_log.phase_total = run_log.items_total
+        run_log.phase_done = 0
         session.commit()
 
         def _on_file_scanned() -> None:
             run_log.items_scanned = (run_log.items_scanned or 0) + 1
+            run_log.phase_done = run_log.items_scanned
             session.commit()
 
         scan_totals = scan_all_enabled(session, media_resolver, on_file_scanned=_on_file_scanned)
-        match_totals = run_matching(session, tracker_row, tracker_adapter)
+
+        run_log.current_phase = "matching"
+        matching_items = session.query(MediaItem).filter(MediaItem.tmdb_id.isnot(None)).all()
+        run_log.phase_total = len(matching_items)
+        run_log.phase_done = 0
+        session.commit()
+
+        def _on_item_matched() -> None:
+            run_log.phase_done = (run_log.phase_done or 0) + 1
+            session.commit()
+
+        match_totals = run_matching(
+            session, tracker_row, tracker_adapter, media_items=matching_items, on_item_matched=_on_item_matched
+        )
 
         auto_seeded = 0
         if torrent_client_adapter is not None:
-            auto_seeded, exec_errors = _execute_pending(session, torrent_client_adapter)
+            run_log.current_phase = "executing"
+            executable_reviews = _get_executable_reviews(session)
+            run_log.phase_total = len(executable_reviews)
+            run_log.phase_done = 0
+            session.commit()
+
+            def _on_executed() -> None:
+                run_log.phase_done = (run_log.phase_done or 0) + 1
+                session.commit()
+
+            auto_seeded, exec_errors = _execute_pending(
+                session, torrent_client_adapter, reviews=executable_reviews, on_executed=_on_executed
+            )
             errors += exec_errors
 
         run_log.items_scanned = scan_totals["scanned"]
@@ -92,38 +122,56 @@ def run_pipeline(
         run_log.errors = errors + 1
         raise
     finally:
+        run_log.current_phase = None
         run_log.finished_at = datetime.now(timezone.utc)
         session.commit()
 
     return run_log
 
 
-def _execute_pending(session: Session, torrent_client_adapter: TorrentClientAdapter) -> tuple[int, int]:
-    """Esegue hardlink+seed per ogni review eseguibile il cui candidate non
-    ha ancora un seed_job (non riprocessa quelle già gestite)."""
-    reviews = (
+def _get_executable_reviews(session: Session) -> list[MatchReview]:
+    return (
         session.query(MatchReview)
         .join(Candidate)
         .filter(MatchReview.status.in_(_EXECUTABLE_STATUSES))
         .all()
     )
+
+
+def _execute_pending(
+    session: Session,
+    torrent_client_adapter: TorrentClientAdapter,
+    reviews: list[MatchReview] | None = None,
+    on_executed: Callable[[], None] | None = None,
+) -> tuple[int, int]:
+    """Esegue hardlink+seed per ogni review eseguibile il cui candidate non
+    ha ancora un seed_job (non riprocessa quelle già gestite)."""
+    if reviews is None:
+        reviews = _get_executable_reviews(session)
+
     seeded = 0
     errors = 0
     for review in reviews:
         if review.candidate.seed_jobs:
+            if on_executed is not None:
+                on_executed()
             continue
         try:
             job = execute_candidate(session, review.candidate, torrent_client_adapter)
         except ExecutionError:
             logger.exception("Esecuzione fallita per candidate %s", review.candidate.id)
             errors += 1
+            if on_executed is not None:
+                on_executed()
             continue
         if job is None:
-            continue  # già in seeding, nessun lavoro necessario
-        if job.final_status == "failed":
+            pass  # già in seeding, nessun lavoro necessario
+        elif job.final_status == "failed":
             errors += 1
         else:
             seeded += 1
+        if on_executed is not None:
+            on_executed()
     return seeded, errors
 
 

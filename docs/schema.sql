@@ -115,10 +115,23 @@ CREATE TABLE IF NOT EXISTS run_log (
     run_type        TEXT NOT NULL CHECK (run_type IN ('scheduled','manual','bulk_import')),
     started_at      TIMESTAMP NOT NULL,
     finished_at     TIMESTAMP,
-    items_total     INTEGER,          -- precontato all'avvio del run, per lo stato live (X/Y)
+    current_phase   TEXT CHECK (current_phase IN ('scanning','matching','executing')),  -- null = non in corso
+    phase_total     INTEGER,          -- totale della fase corrente, per lo stato live (X/Y)
+    phase_done      INTEGER,          -- fatti nella fase corrente
+    items_total     INTEGER,          -- precontato all'avvio del run (totale scan)
     items_scanned   INTEGER DEFAULT 0,
     matches_found   INTEGER DEFAULT 0,
     auto_seeded     INTEGER DEFAULT 0,
     pending_review  INTEGER DEFAULT 0,
     errors          INTEGER DEFAULT 0
 );
+
+-- Indici sulle foreign key più interrogate (SQLite non le indicizza da
+-- solo): senza questi, i conteggi della dashboard (join/exists su
+-- candidate/seed_job) possono rallentare parecchio non appena quelle
+-- tabelle crescono, specie in concorrenza con le scritture di una run.
+CREATE INDEX IF NOT EXISTS idx_candidate_media_item_id ON candidate(media_item_id);
+CREATE INDEX IF NOT EXISTS idx_candidate_tracker_id ON candidate(tracker_id);
+CREATE INDEX IF NOT EXISTS idx_match_review_candidate_id ON match_review(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_seed_job_candidate_id ON seed_job(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_media_item_tmdb_id ON media_item(tmdb_id);

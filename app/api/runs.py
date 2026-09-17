@@ -25,6 +25,9 @@ class RunLogResponse(BaseModel):
     run_type: str
     started_at: str
     finished_at: str | None
+    current_phase: str | None
+    phase_total: int | None
+    phase_done: int | None
     items_total: int | None
     items_scanned: int
     matches_found: int
@@ -39,6 +42,9 @@ class RunLogResponse(BaseModel):
             run_type=run_log.run_type,
             started_at=run_log.started_at.isoformat(),
             finished_at=run_log.finished_at.isoformat() if run_log.finished_at else None,
+            current_phase=run_log.current_phase,
+            phase_total=run_log.phase_total,
+            phase_done=run_log.phase_done,
             items_total=run_log.items_total,
             items_scanned=run_log.items_scanned or 0,
             matches_found=run_log.matches_found or 0,

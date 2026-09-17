@@ -7,6 +7,7 @@ Vedi docs/SPEC.md sezioni 8-9.
 
 import json
 import logging
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ from app.adapters.tracker.base import (
 from app.mediainfo_util import compute_unique_id
 from app.review import create_review_for_candidates
 from app.scanner import VIDEO_EXTENSIONS
+from app.seeding_index import build_seeding_index
 from app.models import Candidate, MediaItem, Tracker
 
 logger = logging.getLogger(__name__)
@@ -35,16 +37,34 @@ def run_matching(
     tracker_row: Tracker,
     tracker_adapter: TrackerAdapter,
     media_items: list[MediaItem] | None = None,
+    on_item_matched: Callable[[], None] | None = None,
 ) -> dict[str, int]:
     """Esegue il matching per una lista di media_item (default: tutti quelli
-    con tmdb_id già risolto). Ritorna contatori aggregati."""
+    con tmdb_id già risolto). Ritorna contatori aggregati.
+
+    Salta la ricerca sul tracker per i media_item già rilevati "in seeding"
+    (stesso indice (st_dev, inode) usato in app/scanner.py): niente da
+    ricollegare, niente da cercare — vedi docs/SPEC.md sezione 10 punto 1."""
     if media_items is None:
         media_items = session.query(MediaItem).filter(MediaItem.tmdb_id.isnot(None)).all()
 
     history = _get_history(tracker_adapter)
+    index_cache: dict[int, set[tuple[int, int]]] = {}
 
-    totals = {"media_items": 0, "candidates": 0, "auto_approved": 0, "pending_review": 0}
+    totals = {
+        "media_items": 0,
+        "candidates": 0,
+        "auto_approved": 0,
+        "pending_review": 0,
+        "already_seeding": 0,
+    }
     for media_item in media_items:
+        if _is_already_seeding(media_item, index_cache):
+            totals["already_seeding"] += 1
+            if on_item_matched is not None:
+                on_item_matched()
+            continue
+
         candidates = match_media_item(session, media_item, tracker_row, tracker_adapter, history=history)
         totals["media_items"] += 1
         totals["candidates"] += len(candidates)
@@ -55,7 +75,19 @@ def run_matching(
                 totals["auto_approved"] += 1
             elif review.status == "pending":
                 totals["pending_review"] += 1
+
+        if on_item_matched is not None:
+            on_item_matched()
     return totals
+
+
+def _is_already_seeding(media_item: MediaItem, index_cache: dict[int, set[tuple[int, int]]]) -> bool:
+    if not media_item.nlink or media_item.nlink <= 1 or media_item.st_dev is None or media_item.inode is None:
+        return False
+    disk = media_item.media_path.disk
+    if disk.id not in index_cache:
+        index_cache[disk.id] = build_seeding_index(disk.root_path, disk.torrents_rel_path)
+    return (media_item.st_dev, media_item.inode) in index_cache[disk.id]
 
 
 def match_media_item(
@@ -85,6 +117,7 @@ def match_media_item(
             source="history",
             confidence=CONFIDENCE_HISTORY,
         )
+        session.commit()
         return [candidate]
 
     torrent_candidates = tracker_adapter.search_by_tmdb(media_item.tmdb_id)
@@ -114,6 +147,7 @@ def match_media_item(
                 ambiguity_reason=ambiguity_reason,
             )
         )
+    session.commit()  # un solo commit per media_item, non uno per candidate
     return persisted
 
 
@@ -212,5 +246,8 @@ def _persist_candidate(
         ambiguity_reason=ambiguity_reason,
     )
     session.add(candidate)
-    session.commit()
+    # Niente commit qui: chiamato una volta per candidato, committare a
+    # ogni chiamata moltiplicherebbe inutilmente le transazioni di
+    # scrittura. Il chiamante (match_media_item) committa una volta sola
+    # dopo aver aggiunto tutti i candidati di un media_item.
     return candidate

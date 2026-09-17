@@ -217,12 +217,18 @@ class RunLog(Base):
     __tablename__ = "run_log"
     __table_args__ = (
         CheckConstraint("run_type IN ('scheduled','manual','bulk_import')", name="ck_run_log_run_type"),
+        CheckConstraint(
+            "current_phase IN ('scanning','matching','executing')", name="ck_run_log_current_phase"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     run_type: Mapped[str] = mapped_column(nullable=False)
     started_at: Mapped[datetime] = mapped_column(nullable=False)
     finished_at: Mapped[datetime | None]
+    current_phase: Mapped[str | None]
+    phase_total: Mapped[int | None]
+    phase_done: Mapped[int | None]
     items_total: Mapped[int | None]
     items_scanned: Mapped[int | None] = mapped_column(server_default=text("0"))
     matches_found: Mapped[int | None] = mapped_column(server_default=text("0"))
