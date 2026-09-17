@@ -1,5 +1,10 @@
 """API per la coda di revisione: lista dei match_review e decisione
-(approvazione/rifiuto) manuale. Vedi docs/SPEC.md sezione 9."""
+(approvazione/rifiuto) manuale, singola o in blocco. Vedi docs/SPEC.md
+sezione 9.
+
+Nessuna esecuzione (hardlink+seed) senza conferma umana esplicita, nemmeno
+per i match che il sistema giudica affidabili (status auto_approved) —
+vedi app/review.py."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -48,23 +53,26 @@ def _get_review_or_404(session: Session, review_id: int) -> MatchReview:
     return review
 
 
-def _require_pending(review: MatchReview) -> None:
-    if review.status != "pending":
+def _require_decidable(review: MatchReview) -> None:
+    if review.status not in review_service.READY_FOR_DECISION_STATUSES:
         raise HTTPException(
-            status_code=409, detail=f"Review {review.id} non è pending (stato attuale: {review.status})"
+            status_code=409, detail=f"Review {review.id} non è decidibile (stato attuale: {review.status})"
         )
 
 
 @router.get("", response_model=list[ReviewResponse])
-def list_reviews(status: str = "pending", session: Session = Depends(get_session)):
-    reviews = session.query(MatchReview).filter(MatchReview.status == status).all()
+def list_reviews(status: str | None = None, session: Session = Depends(get_session)):
+    if status is not None:
+        reviews = session.query(MatchReview).filter(MatchReview.status == status).all()
+    else:
+        reviews = review_service.list_ready_for_review(session)
     return [ReviewResponse.from_review(r) for r in reviews]
 
 
 @router.post("/{review_id}/approve", response_model=ReviewResponse)
 def approve_review(review_id: int, session: Session = Depends(get_session)):
     review = _get_review_or_404(session, review_id)
-    _require_pending(review)
+    _require_decidable(review)
     review_service.approve(session, review)
     return ReviewResponse.from_review(review)
 
@@ -72,6 +80,12 @@ def approve_review(review_id: int, session: Session = Depends(get_session)):
 @router.post("/{review_id}/reject", response_model=ReviewResponse)
 def reject_review(review_id: int, session: Session = Depends(get_session)):
     review = _get_review_or_404(session, review_id)
-    _require_pending(review)
+    _require_decidable(review)
     review_service.reject(session, review)
     return ReviewResponse.from_review(review)
+
+
+@router.post("/approve-all")
+def approve_all_reviews(session: Session = Depends(get_session)):
+    approved = review_service.approve_all(session)
+    return {"approved": approved}

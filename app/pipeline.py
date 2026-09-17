@@ -1,30 +1,28 @@
-"""Orchestrazione dell'intero flusso: scan -> match -> auto-seed -> run_log.
+"""Orchestrazione dello scan+match: scan -> match -> run_log.
 
 Vedi docs/SPEC.md sezione 11: import massivo e run schedulato condividono
 lo stesso motore, cambia solo il trigger (run_type) e il volume atteso.
 Ogni run produce una riga in run_log con i contatori aggregati.
-"""
+
+L'esecuzione (hardlink + seed) NON è più automatica a fine run — richiesta
+esplicita dell'utente: prima di toccare filesystem/client torrent, ogni
+match (auto-approvato dal sistema o no) aspetta una conferma umana dalla
+coda di revisione (vedi app/review.py), singola o in blocco. Un run
+produce quindi solo candidate/match_review, mai un seed_job."""
 
 import logging
-from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.adapter_factory import build_media_resolver, build_torrent_client_adapter, build_tracker_adapter
+from app.adapter_factory import build_media_resolver, build_tracker_adapter
 from app.adapters.media_resolver.base import MediaResolverAdapter
-from app.adapters.torrent_client.base import TorrentClientAdapter
 from app.adapters.tracker.base import TrackerAdapter
-from app.executor import ExecutionError, execute_candidate
 from app.matching import run_matching
-from app.models import Candidate, MatchReview, MediaItem, RunLog, Tracker, TorrentClient
+from app.models import MediaItem, RunLog, Tracker
 from app.scanner import count_enabled_video_files, scan_all_enabled
 
 logger = logging.getLogger(__name__)
-
-# Review pronte per l'esecuzione: sia quelle auto-approvate sopra soglia
-# sia quelle approvate manualmente dalla coda di revisione.
-_EXECUTABLE_STATUSES = ("auto_approved", "approved")
 
 
 def close_stale_runs(session: Session) -> int:
@@ -53,7 +51,6 @@ def run_pipeline(
     tracker_row: Tracker,
     tracker_adapter: TrackerAdapter,
     media_resolver: MediaResolverAdapter,
-    torrent_client_adapter: TorrentClientAdapter | None = None,
 ) -> RunLog:
     run_log = RunLog(run_type=run_type, started_at=datetime.now(timezone.utc))
     session.add(run_log)
@@ -99,36 +96,17 @@ def run_pipeline(
             session, tracker_row, tracker_adapter, media_items=matching_items, on_item_matched=_on_item_matched
         )
         logger.info(
-            "Matching completato: %d candidati trovati, %d auto-approvati, %d in revisione, %d già in seeding",
+            "Matching completato: %d candidati trovati, %d pronti per conferma (auto), "
+            "%d da rivedere, %d già in seeding",
             match_totals["candidates"],
             match_totals["auto_approved"],
             match_totals["pending_review"],
             match_totals["already_seeding"],
         )
 
-        auto_seeded = 0
-        if torrent_client_adapter is not None:
-            run_log.current_phase = "executing"
-            executable_reviews = _get_executable_reviews(session)
-            run_log.phase_total = len(executable_reviews)
-            run_log.phase_done = 0
-            session.commit()
-            logger.info("Fase esecuzione: %d match approvati pronti per hardlink+seed", len(executable_reviews))
-
-            def _on_executed() -> None:
-                run_log.phase_done = (run_log.phase_done or 0) + 1
-                session.commit()
-
-            auto_seeded, exec_errors = _execute_pending(
-                session, torrent_client_adapter, reviews=executable_reviews, on_executed=_on_executed
-            )
-            errors += exec_errors
-            logger.info("Esecuzione completata: %d seedati, %d errori", auto_seeded, exec_errors)
-
         run_log.items_scanned = scan_totals["scanned"]
         run_log.matches_found = match_totals["candidates"]
-        run_log.auto_seeded = auto_seeded
-        run_log.pending_review = match_totals["pending_review"]
+        run_log.pending_review = match_totals["pending_review"] + match_totals["auto_approved"]
         run_log.errors = errors
     except Exception:
         # La sessione può essere in stato "rollback pending" dopo un
@@ -144,55 +122,14 @@ def run_pipeline(
         run_log.current_phase = None
         run_log.finished_at = datetime.now(timezone.utc)
         session.commit()
-        logger.info("Run %s terminata (errori: %d)", run_log_id, run_log.errors or 0)
+        logger.info(
+            "Run %s terminata: %d in attesa di conferma per l'hardlink, errori: %d",
+            run_log_id,
+            run_log.pending_review or 0,
+            run_log.errors or 0,
+        )
 
     return run_log
-
-
-def _get_executable_reviews(session: Session) -> list[MatchReview]:
-    return (
-        session.query(MatchReview)
-        .join(Candidate)
-        .filter(MatchReview.status.in_(_EXECUTABLE_STATUSES))
-        .all()
-    )
-
-
-def _execute_pending(
-    session: Session,
-    torrent_client_adapter: TorrentClientAdapter,
-    reviews: list[MatchReview] | None = None,
-    on_executed: Callable[[], None] | None = None,
-) -> tuple[int, int]:
-    """Esegue hardlink+seed per ogni review eseguibile il cui candidate non
-    ha ancora un seed_job (non riprocessa quelle già gestite)."""
-    if reviews is None:
-        reviews = _get_executable_reviews(session)
-
-    seeded = 0
-    errors = 0
-    for review in reviews:
-        if review.candidate.seed_jobs:
-            if on_executed is not None:
-                on_executed()
-            continue
-        try:
-            job = execute_candidate(session, review.candidate, torrent_client_adapter)
-        except ExecutionError:
-            logger.exception("Esecuzione fallita per candidate %s", review.candidate.id)
-            errors += 1
-            if on_executed is not None:
-                on_executed()
-            continue
-        if job is None:
-            pass  # già in seeding, nessun lavoro necessario
-        elif job.final_status == "failed":
-            errors += 1
-        else:
-            seeded += 1
-        if on_executed is not None:
-            on_executed()
-    return seeded, errors
 
 
 def get_current_run(session: Session) -> RunLog | None:
@@ -202,9 +139,10 @@ def get_current_run(session: Session) -> RunLog | None:
 
 
 def build_and_run_pipeline(session: Session, run_type: str) -> RunLog | None:
-    """Trova tracker/torrent_client abilitati, costruisce gli adapter dal DB
-    e lancia run_pipeline. Ritorna None (nessun run_log creato) se manca la
-    configurazione minima — mai un errore fatale per una config incompleta."""
+    """Trova un tracker abilitato, costruisce gli adapter dal DB e lancia
+    run_pipeline (solo scan+match, mai esecuzione — vedi sopra). Ritorna
+    None (nessun run_log creato) se manca la configurazione minima — mai
+    un errore fatale per una config incompleta."""
     tracker_row = session.query(Tracker).filter_by(enabled=True).first()
     if tracker_row is None:
         logger.info("Nessun tracker abilitato configurato: run saltato")
@@ -217,12 +155,4 @@ def build_and_run_pipeline(session: Session, run_type: str) -> RunLog | None:
         logger.warning("Run saltato, configurazione incompleta: %s", exc)
         return None
 
-    torrent_client_adapter = None
-    torrent_client_row = session.query(TorrentClient).filter_by(enabled=True).first()
-    if torrent_client_row is not None:
-        try:
-            torrent_client_adapter = build_torrent_client_adapter(torrent_client_row)
-        except ValueError as exc:
-            logger.warning("Client torrent non utilizzabile: %s", exc)
-
-    return run_pipeline(session, run_type, tracker_row, tracker_adapter, media_resolver, torrent_client_adapter)
+    return run_pipeline(session, run_type, tracker_row, tracker_adapter, media_resolver)

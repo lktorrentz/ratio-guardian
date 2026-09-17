@@ -58,8 +58,10 @@ def create_review_for_candidates(session: Session, candidates: list[Candidate]) 
 def approve(session: Session, review: MatchReview, decided_by: str = "user") -> MatchReview:
     """Approva e prova subito l'esecuzione (hardlink+seed) se un client
     torrent è configurato. Un fallimento dell'esecuzione non annulla
-    l'approvazione: resta approved con il seed_job in stato failed, e verrà
-    ritentata al prossimo run (vedi app.pipeline._execute_pending)."""
+    l'approvazione: resta approved con il seed_job in stato failed. NOTA:
+    non viene ritentata automaticamente — un candidate con un seed_job
+    (anche fallito) non ricompare più in list_ready_for_review(). Un
+    retry va rifatto a mano (es. dal DB) finché non esiste una UI apposita."""
     review.status = "approved"
     review.decided_by = decided_by
     review.decided_at = datetime.now(timezone.utc)
@@ -91,3 +93,33 @@ def reject(session: Session, review: MatchReview, decided_by: str = "user") -> M
     review.decided_at = datetime.now(timezone.utc)
     session.commit()
     return review
+
+
+# Richiesta esplicita dell'utente: nessuna esecuzione (hardlink+seed) senza
+# conferma umana, nemmeno per i match che il sistema giudica affidabili
+# (auto_approved) — quella classificazione resta solo un'indicazione nella
+# UI ("alta confidence" vs "da verificare"), mai un lasciapassare automatico.
+READY_FOR_DECISION_STATUSES = ("pending", "auto_approved")
+
+
+def list_ready_for_review(session: Session) -> list[MatchReview]:
+    """match_review in attesa di una decisione (pending o auto_approved) il
+    cui candidate non ha ancora un seed_job — esclude quelle già eseguite
+    (con successo o meno) in un tentativo precedente."""
+    reviews = (
+        session.query(MatchReview)
+        .join(Candidate)
+        .filter(MatchReview.status.in_(READY_FOR_DECISION_STATUSES))
+        .all()
+    )
+    return [r for r in reviews if not r.candidate.seed_jobs]
+
+
+def approve_all(session: Session, decided_by: str = "user") -> int:
+    """Approva ed esegue ogni review pronta (vedi list_ready_for_review).
+    Ritorna quante ne ha processate. Un fallimento su una non blocca le
+    altre — ciascuna resta con il proprio esito (visibile su seed_job)."""
+    reviews = list_ready_for_review(session)
+    for review in reviews:
+        approve(session, review, decided_by=decided_by)
+    return len(reviews)
