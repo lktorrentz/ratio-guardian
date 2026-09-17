@@ -48,6 +48,7 @@ class Disk(Base):
     root_path: Mapped[str] = mapped_column(nullable=False, unique=True)
     st_dev: Mapped[int | None]
     torrents_rel_path: Mapped[str | None]
+    torrent_client_root_path: Mapped[str | None]
     created_at: Mapped[datetime | None] = mapped_column(server_default=text("CURRENT_TIMESTAMP"))
 
     media_paths: Mapped[list["MediaPath"]] = relationship(

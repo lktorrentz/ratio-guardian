@@ -63,7 +63,16 @@ def execute_candidate(
     if not video_files:
         raise ExecutionError(f"Candidate {candidate.id} non ha file video nel file_list")
 
-    if candidate.folder or len(video_files) > 1:
+    # Un solo file video non è per forza un torrent "piatto": molte release
+    # (specie film) impacchettano comunque il file dentro una cartella con
+    # lo stesso nome della release (candidate.folder valorizzato pur con un
+    # solo video) — un dettaglio di posizionamento, non un pack TV da
+    # riconciliare episodio per episodio. Il dispacciamento verso la
+    # riconciliazione multi-episodio si basa solo sul numero di file video,
+    # MAI sulla sola presenza di folder (bug: prima instradava qui anche i
+    # film con un solo file ma una cartella, facendo fallire guessit che
+    # cerca un numero di episodio inesistente).
+    if len(video_files) > 1:
         return _execute_season_pack(session, candidate, media_item, disk, torrents_root, video_files, torrent_client_adapter)
     return _execute_single_file(session, candidate, media_item, disk, torrents_root, video_files[0], torrent_client_adapter)
 
@@ -86,8 +95,13 @@ def _execute_single_file(
         logger.info("File già in seeding (%s), skip: %s", existing, source_path)
         return None
 
+    # Anche un torrent a file singolo può avere una cartella contenitore
+    # (candidate.folder) — molte release la usano pure per i film, non solo
+    # per i pack TV. Va ricreata, mai appiattita nella root della cartella
+    # torrent.
+    relative_target = os.path.join(candidate.folder, expected_filename) if candidate.folder else expected_filename
     try:
-        target_path = resolve_scoped(disk.root_path, os.path.join(disk.torrents_rel_path, expected_filename))
+        target_path = resolve_scoped(disk.root_path, os.path.join(disk.torrents_rel_path, relative_target))
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
@@ -95,6 +109,8 @@ def _execute_single_file(
 
     if os.path.exists(target_path):
         raise ExecutionError(f"Il path di destinazione esiste già: {target_path}")
+
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     seed_job = SeedJob(candidate_id=candidate.id, final_status="in_progress")
     session.add(seed_job)
@@ -210,7 +226,9 @@ def _link_and_seed(
         session.commit()
         logger.info("Hardlink creato per candidate %s: %s", candidate.id, seed_job.hardlink_path)
 
-        info_hash = adapter.add_torrent(candidate.download_link, save_path=torrents_root, force_recheck=True)
+        disk = candidate.media_item.media_path.disk
+        client_save_path = _client_visible_path(disk, torrents_root)
+        info_hash = adapter.add_torrent(candidate.download_link, save_path=client_save_path, force_recheck=True)
         seed_job.info_hash = info_hash
         seed_job.torrent_added_at = datetime.now(timezone.utc)
         seed_job.recheck_status = "pending"
@@ -223,6 +241,22 @@ def _link_and_seed(
         raise ExecutionError(str(exc)) from exc
 
     return seed_job
+
+
+def _client_visible_path(disk: Disk, local_path: str) -> str:
+    """Traduce un path lato Ratio Guardian nel path equivalente visto dal
+    client torrent, quando i due girano in container/mount diversi per lo
+    stesso disco fisico (disk.torrent_client_root_path configurato). Se non
+    configurato, assume che client e Ratio Guardian vedano lo stesso path
+    (comportamento invariato per chi non ne ha bisogno)."""
+    if not disk.torrent_client_root_path:
+        return local_path
+    root_real = os.path.realpath(disk.root_path)
+    local_real = os.path.realpath(local_path)
+    if local_real != root_real and not local_real.startswith(root_real + os.sep):
+        return local_path  # fuori dal disco: non dovrebbe succedere, non tocchiamo nulla
+    relative = os.path.relpath(local_real, root_real)
+    return disk.torrent_client_root_path if relative == "." else os.path.join(disk.torrent_client_root_path, relative)
 
 
 def retry_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAdapter) -> SeedJob:
@@ -267,7 +301,8 @@ def retry_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAd
         raise ExecutionError(str(exc)) from exc
 
     try:
-        info_hash = adapter.add_torrent(candidate.download_link, save_path=torrents_root, force_recheck=True)
+        client_save_path = _client_visible_path(disk, torrents_root)
+        info_hash = adapter.add_torrent(candidate.download_link, save_path=client_save_path, force_recheck=True)
         seed_job.info_hash = info_hash
         seed_job.torrent_added_at = datetime.now(timezone.utc)
         seed_job.recheck_status = "pending"

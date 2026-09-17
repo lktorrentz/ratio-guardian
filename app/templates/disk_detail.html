@@ -30,6 +30,22 @@
     </div>
 </div>
 
+<div class="bg-white border rounded-lg p-4 mb-8 max-w-xl">
+    <h2 class="font-medium mb-2">Path visto dal client torrent (se diverso)</h2>
+    <p class="text-xs text-gray-500 mb-3">
+        Da impostare solo se il client torrent gira in un container/host diverso da Ratio Guardian e vede
+        questo stesso disco fisico con un path diverso (es. Ratio Guardian lo vede come <code>{{ disk.root_path }}</code>
+        ma qBittorrent lo vede come <code>/data/disk1</code>) — altrimenti lascia vuoto.
+        Ratio Guardian non può sfogliare il filesystem del client: va scritto a mano.
+    </p>
+    <form method="post" action="/config/disks/{{ disk.id }}/torrent-client-path" class="flex gap-2">
+        <input type="text" name="torrent_client_root_path" value="{{ disk.torrent_client_root_path or '' }}"
+               placeholder="es. /data/disk1 (vuoto = stesso path di Ratio Guardian)"
+               class="flex-1 border rounded px-2 py-1.5 text-sm font-mono">
+        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Salva</button>
+    </form>
+</div>
+
 <h2 class="font-medium mb-3">Media path</h2>
 <div class="bg-white border rounded-lg overflow-hidden mb-6">
     <table class="w-full text-left">

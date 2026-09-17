@@ -4,12 +4,16 @@
 -- ============ CONFIGURAZIONE ============
 
 CREATE TABLE IF NOT EXISTS disk (
-    id                  INTEGER PRIMARY KEY,
-    label               TEXT NOT NULL,
-    root_path           TEXT NOT NULL UNIQUE,   -- deve combaciare/essere dentro un mount di config.yaml
-    st_dev              INTEGER,                -- cachato all'ultima verifica
-    torrents_rel_path   TEXT,                   -- relativo a root_path, nullable
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                          INTEGER PRIMARY KEY,
+    label                       TEXT NOT NULL,
+    root_path                   TEXT NOT NULL UNIQUE,   -- deve combaciare/essere dentro un mount di config.yaml
+    st_dev                      INTEGER,                -- cachato all'ultima verifica
+    torrents_rel_path           TEXT,                   -- relativo a root_path, nullable
+    torrent_client_root_path    TEXT,                   -- root di QUESTO disco vista dal client torrent, se diverso
+                                                         -- da root_path (container/mount diversi per lo stesso disco
+                                                         -- fisico) — nullo se client e Ratio Guardian vedono lo
+                                                         -- stesso path (caso comune, stesso host o stesso mount)
+    created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS media_path (

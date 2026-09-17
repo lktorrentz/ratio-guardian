@@ -97,6 +97,23 @@ def set_torrents_path_page(
     return RedirectResponse(url=f"/config/disks/{disk_id}", status_code=303)
 
 
+@router.post("/disks/{disk_id}/torrent-client-path")
+def set_torrent_client_path_page(
+    disk_id: int,
+    torrent_client_root_path: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    """Path con cui il CLIENT TORRENT vede la root di questo disco, se
+    diverso dal path di Ratio Guardian (container/mount diversi per lo
+    stesso disco fisico) — testo libero, non un tree browser: Ratio
+    Guardian non ha modo di sfogliare il filesystem del client."""
+    disk = session.get(Disk, disk_id)
+    if disk is not None:
+        disk.torrent_client_root_path = torrent_client_root_path.strip() or None
+        session.commit()
+    return RedirectResponse(url=f"/config/disks/{disk_id}", status_code=303)
+
+
 @router.post("/disks/{disk_id}/media-paths")
 def create_media_path_page(
     disk_id: int,
