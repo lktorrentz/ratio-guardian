@@ -1,8 +1,12 @@
 """Caricamento della configurazione statica (config.yaml).
 
-Vedi docs/SPEC.md sezione 4: config.yaml contiene SOLO i mount point fisici
-dei dischi e il data_dir. Tutto il resto vive nel DB (tabella app_settings
-e le altre tabelle di configurazione) ed è editabile da UI senza restart.
+Vedi docs/SPEC.md sezione 4: config.yaml contiene SOLO disk_scan_root
+(la radice sotto cui il container si aspetta i bind mount dei dischi
+fisici, es. /mnt) e il data_dir. I singoli dischi non sono più elencati
+qui: vengono scoperti scansionando disk_scan_root e aggiunti dalla Web UI
+(vedi app/api/disks.py::list_available_mounts). Tutto il resto vive nel DB
+(tabella app_settings e le altre tabelle di configurazione) ed è editabile
+da UI senza restart.
 """
 
 import os
@@ -13,15 +17,14 @@ from pydantic import BaseModel, field_validator
 
 
 class Settings(BaseModel):
-    disks: list[str]
+    disk_scan_root: str = "/mnt"
     data_dir: str
 
-    @field_validator("disks")
+    @field_validator("disk_scan_root")
     @classmethod
-    def _disks_must_be_absolute(cls, value: list[str]) -> list[str]:
-        for disk in value:
-            if not os.path.isabs(disk):
-                raise ValueError(f"disks: il path '{disk}' deve essere assoluto")
+    def _disk_scan_root_must_be_absolute(cls, value: str) -> str:
+        if not os.path.isabs(value):
+            raise ValueError(f"disk_scan_root: il path '{value}' deve essere assoluto")
         return value
 
     @property

@@ -29,7 +29,7 @@ Un utente senza RAID/FUSE ha dischi fisici distinti, ciascuno potenzialmente con
 ### Entità
 
 **Disk** (fisico, root a livello di mount point)
-- `root_path`: deve corrispondere (o essere contenuto in) uno dei mount dichiarati in `config.yaml`
+- `root_path`: deve essere contenuto in `disk_scan_root` (config.yaml, default `/mnt`) ed esistere come cartella — i mount candidati (bind mount Docker non ancora assegnati a un Disk) si scoprono scansionando `disk_scan_root`, non da un elenco statico
 - `torrents_rel_path`: opzionale, relativo a `root_path`. Se assente, l'utente lo crea al volo (vedi File Browser API) come cartella sorella della libreria media su quello stesso disco — mai creata in automatico senza conferma esplicita in UI.
 - `st_dev` cachato: valore inode device number rilevato all'ultima verifica, usato per rilevare dischi rimontati/sostituiti in modo silente
 
@@ -52,15 +52,12 @@ Doppio livello:
 
 ## 4. Configurazione: split YAML / DB
 
-- **`config.yaml`** (statico, richiede restart del container): **solo** i mount point fisici dei dischi visibili al container, più il path dati dell'app.
+- **`config.yaml`** (statico, richiede restart del container): **solo** `disk_scan_root` (radice sotto cui il container si aspetta i bind mount dei dischi fisici, default `/mnt`) e il path dati dell'app. I singoli dischi NON sono elencati qui.
   ```yaml
-  disks:
-    - /mnt/disk1
-    - /mnt/disk2
-    - /mnt/disk3
+  disk_scan_root: /mnt
   data_dir: /app/data
   ```
-- **DB** (dinamico, editabile da Web UI senza restart): entità Disk/MediaPath, configurazione tracker (URL, token, adapter type), configurazione client torrent, soglie di confidence, scheduling, tutto il resto.
+- **DB** (dinamico, editabile da Web UI senza restart): entità Disk/MediaPath, configurazione tracker (URL, token, adapter type), configurazione client torrent, soglie di confidence, scheduling, tutto il resto. I dischi si aggiungono dalla Web UI scegliendo tra le sottocartelle di `disk_scan_root` trovate come bind mount ma non ancora assegnate a un Disk (`GET /config/disks` calcola questa lista scansionando il filesystem, vedi `app/api/disks.py::list_available_mounts`) — aggiungere un disco fisico richiede solo un nuovo bind mount Docker (Path del template Unraid, o `volumes:` in docker-compose) sotto `disk_scan_root` e un riavvio/ricreazione del container, mai una modifica di `config.yaml`.
 
 Motivazione: i mount Docker sono decisioni a livello di deployment (richiedono comunque un restart per cambiare), tutto il resto deve poter essere modificato senza toccare file o riavviare nulla.
 

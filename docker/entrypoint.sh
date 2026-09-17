@@ -30,13 +30,14 @@ chown -R "$PUID:$PGID" /app/data
 # /app/config è montato come CARTELLA (mai un file): se il path sull'host
 # non esiste ancora, Docker crea comunque una directory (corretto), mai
 # un file al posto sbagliato. Se manca config.yaml al suo interno,
-# seminiamo il template di default cosi' il container parte comunque
-# (con dischi placeholder) invece di crashare — l'utente lo edita
-# dall'host e riavvia.
+# seminiamo il template di default (disk_scan_root=/mnt, data_dir di
+# default) cosi' il container parte comunque invece di crashare — i
+# dischi fisici non vanno elencati qui, si aggiungono dalla Web UI una
+# volta montati sotto disk_scan_root.
 mkdir -p /app/config
 if [ ! -f /app/config/config.yaml ]; then
     cp /app/config.example.yaml /app/config/config.yaml
-    echo "config/config.yaml non trovato: creato da config.example.yaml. Modificalo con i tuoi dischi reali e riavvia il container."
+    echo "config/config.yaml non trovato: creato da config.example.yaml con i valori di default."
 fi
 chown -R "$PUID:$PGID" /app/config
 

@@ -84,18 +84,35 @@ def _get_disk_or_404(session: Session, disk_id: int) -> Disk:
     return disk
 
 
-def is_within_configured_mounts(path: str, configured_mounts: list[str]) -> bool:
+def is_within_scan_root(path: str, scan_root: str) -> bool:
     real = os.path.realpath(path)
-    return any(
-        real == os.path.realpath(mount) or real.startswith(os.path.realpath(mount) + os.sep)
-        for mount in configured_mounts
-    )
+    real_root = os.path.realpath(scan_root)
+    return real == real_root or real.startswith(real_root + os.sep)
 
 
-def create_disk(session: Session, label: str, root_path: str, configured_mounts: list[str]) -> Disk:
-    if not is_within_configured_mounts(root_path, configured_mounts):
+def list_available_mounts(scan_root: str, used_paths: set[str]) -> list[str]:
+    """Sottocartelle di primo livello di scan_root non ancora assegnate a
+    un Disk — sono i bind mount dei dischi fisici (vedi docker-compose.yml,
+    che li monta 1:1 sotto scan_root, di default /mnt) non ancora aggiunti
+    dalla Web UI. Nessuna dipendenza da config.yaml: basta il bind mount
+    Docker perché un disco compaia qui."""
+    if not os.path.isdir(scan_root):
+        return []
+    used_real = {os.path.realpath(p) for p in used_paths}
+    mounts = [
+        entry.path
+        for entry in os.scandir(scan_root)
+        if entry.is_dir() and os.path.realpath(entry.path) not in used_real
+    ]
+    return sorted(mounts)
+
+
+def create_disk(session: Session, label: str, root_path: str, scan_root: str) -> Disk:
+    if not os.path.isdir(root_path):
+        raise DiskValidationError(f"root_path non è una cartella raggiungibile: {root_path}")
+    if not is_within_scan_root(root_path, scan_root):
         raise DiskValidationError(
-            "root_path deve corrispondere (o essere contenuto in) uno dei mount configurati in config.yaml"
+            f"root_path deve essere contenuto in disk_scan_root ({scan_root})"
         )
     disk = Disk(label=label, root_path=root_path)
     session.add(disk)
@@ -191,7 +208,7 @@ def list_disks(session: Session = Depends(get_session)):
 @router.post("", response_model=DiskResponse, status_code=201)
 def create_disk_endpoint(body: DiskCreateRequest, request: Request, session: Session = Depends(get_session)):
     try:
-        disk = create_disk(session, body.label, body.root_path, request.app.state.settings.disks)
+        disk = create_disk(session, body.label, body.root_path, request.app.state.settings.disk_scan_root)
     except DiskValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DiskConflictError as exc:

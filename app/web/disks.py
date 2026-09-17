@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.disks import DiskConflictError, DiskValidationError, create_disk, verify_disk
+from app.api.disks import (
+    DiskConflictError,
+    DiskValidationError,
+    create_disk,
+    list_available_mounts,
+    verify_disk,
+)
 from app.api.media_paths import MediaPathConflictError, MediaPathValidationError, create_media_path_row
 from app.deps import get_session
 from app.models import Disk, MediaPath
@@ -19,7 +25,7 @@ router = APIRouter(prefix="/config")
 def disks_page(request: Request, session: Session = Depends(get_session)):
     disks = session.query(Disk).all()
     used_mounts = {d.root_path for d in disks}
-    available_mounts = [m for m in request.app.state.settings.disks if m not in used_mounts]
+    available_mounts = list_available_mounts(request.app.state.settings.disk_scan_root, used_mounts)
     return templates.TemplateResponse(
         request,
         "disks.html",
@@ -35,7 +41,7 @@ def create_disk_page(
     session: Session = Depends(get_session),
 ):
     try:
-        create_disk(session, label, root_path, request.app.state.settings.disks)
+        create_disk(session, label, root_path, request.app.state.settings.disk_scan_root)
     except (DiskValidationError, DiskConflictError) as exc:
         return RedirectResponse(url=f"/config/disks?error={quote(str(exc))}", status_code=303)
     return RedirectResponse(url="/config/disks", status_code=303)

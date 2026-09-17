@@ -61,7 +61,7 @@
                 <input name="label" required class="w-full border rounded px-2 py-1.5 text-sm">
             </div>
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Mount point (da config.yaml)</label>
+                <label class="block text-xs text-gray-500 mb-1">Mount point (rilevato automaticamente)</label>
                 <select name="root_path" class="w-full border rounded px-2 py-1.5 text-sm">
                     {% for mount in available_mounts %}
                     <option value="{{ mount }}">{{ mount }}</option>
@@ -75,7 +75,11 @@
             </div>
         </form>
         {% else %}
-        <p class="text-sm text-gray-500">Tutti i mount configurati in <code>config.yaml</code> sono già assegnati a un disco.</p>
+        <p class="text-sm text-gray-500">
+            Nessun nuovo mount trovato. Aggiungi un bind mount del disco fisico al container (un "Path" nel
+            template Unraid, o una riga in <code>volumes:</code> di docker-compose) sotto la cartella di scan
+            configurata, ricrea/riavvia il container e ricarica questa pagina — non serve toccare config.yaml.
+        </p>
         <div class="flex justify-end pt-3">
             <button type="button" onclick="document.getElementById('add-disk-modal').close()" class="text-sm text-gray-600 px-3 py-1.5">Chiudi</button>
         </div>

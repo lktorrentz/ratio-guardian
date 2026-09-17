@@ -1,18 +1,15 @@
 # Ratio Guardian — configurazione statica
 #
-# Contiene SOLO i mount point fisici dei dischi visibili dentro il
-# container e il path dati dell'app. Tutto il resto (dischi logici,
-# media path, tracker, client torrent, scheduling, soglie di confidence)
-# si configura dalla Web UI dopo il primo avvio, senza restart.
+# I dischi fisici NON si elencano più qui: basta montarli nel container
+# sotto disk_scan_root (di default /mnt, vedi docker-compose.yml), e
+# compariranno da soli nella Web UI ("Dischi" → "Aggiungi disco") pronti
+# da aggiungere con un click, senza toccare questo file né riavviare.
 #
-# Ogni voce in "disks" deve corrispondere a un bind mount reale del
-# container (vedi docker-compose.yml). Se aggiungi/rimuovi un disco fisico
-# devi aggiornare sia questo file sia i volumes del docker-compose, e
-# riavviare il container.
+# disk_scan_root: opzionale, default "/mnt". Cambialo solo se i tuoi bind
+# mount dei dischi vivono sotto un'altra radice dentro il container.
+#
+# data_dir: dati persistenti dell'app (database SQLite).
 
-disks:
-  - /mnt/disk1
-  - /mnt/disk2
-  - /mnt/disk3
+disk_scan_root: /mnt
 
 data_dir: /app/data

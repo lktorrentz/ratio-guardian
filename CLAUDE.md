@@ -29,7 +29,7 @@ Leggi **`docs/SPEC.md`** prima di scrivere codice: contiene tutte le decisioni d
 - **Ogni azione distruttiva o irreversibile passa dalla `match_review` queue se la confidence non è massima.** Non bypassare mai questo meccanismo per "velocizzare" — vedi SPEC.md sezione Confidence.
 - **Mai `skip_checking` sul client torrent.** Il recheck reale è un requisito funzionale, non un dettaglio implementativo opzionale.
 - **Path traversal:** qualunque endpoint che tocca il filesystem (browse, mkdir, hardlink) deve passare dalla funzione di scoping condivisa descritta in `docs/SPEC.md` (sezione File Browser API). Non duplicare quella logica in più punti.
-- **Configurazione:** solo i mount point dei dischi fisici vivono in `config.example.yaml` (statico, richiede restart). Tutto il resto (dischi logici, media path, tracker, credenziali, scheduling, soglie) vive nel DB ed è editabile da UI senza restart.
+- **Configurazione:** `config.example.yaml` (statico, richiede restart) contiene solo `disk_scan_root` (radice dei bind mount dei dischi fisici, default `/mnt`) e `data_dir`. I dischi fisici NON sono elencati lì: si scoprono scansionando `disk_scan_root` e si aggiungono dalla Web UI (basta il bind mount Docker sotto quella radice). Tutto il resto (dischi logici, media path, tracker, credenziali, scheduling, soglie) vive nel DB ed è editabile da UI senza restart.
 
 ## Struttura repo di partenza
 

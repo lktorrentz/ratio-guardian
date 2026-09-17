@@ -2,13 +2,17 @@
 # supervisord (vedi Dockerfile e docker/supervisord.conf) — un solo
 # servizio docker-compose.
 #
-# I mount dei dischi qui sotto sono un ESEMPIO — vanno fatti combaciare
-# 1:1 con le voci "disks" di config/config.yaml (stesso path dentro al
-# container).
+# I mount dei dischi qui sotto sono un ESEMPIO — basta montare ogni disco
+# fisico come sottocartella diretta di /mnt (stesso path dentro al
+# container, es. /mnt/disk1 -> /mnt/disk1): Ratio Guardian li rileva da
+# solo (scansiona /mnt, vedi config.yaml "disk_scan_root") e li propone
+# nella Web UI ("Dischi" -> "Aggiungi disco"), senza bisogno di elencarli
+# in nessun file di configurazione. Per aggiungere/rimuovere un disco
+# basta editare i volumes qui sotto e ricreare il container.
 #
 # ./config è montato come CARTELLA (non un file): se config/config.yaml
 # non esiste al primo avvio, il container lo crea da config.example.yaml
-# e parte comunque — modificalo con i tuoi dischi reali e riavvia.
+# e parte comunque coi valori di default.
 
 services:
   ratio-guardian:
@@ -26,8 +30,9 @@ services:
     volumes:
       - ./config:/app/config
       - ratio-guardian-data:/app/data
-      # Esempio dischi fisici — adattare ai mount reali dell'host,
-      # devono corrispondere a config.yaml "disks:"
+      # Esempio dischi fisici — adattare ai mount reali dell'host, uno per
+      # disco fisico, ciascuno come sottocartella diretta di /mnt dentro
+      # al container (mai /mnt/user/FUSE: vedi unraid/ratio-guardian.xml)
       - /mnt/disk1:/mnt/disk1
       - /mnt/disk2:/mnt/disk2
       - /mnt/disk3:/mnt/disk3
