@@ -31,7 +31,20 @@ class Settings(BaseModel):
 
 def load_settings(config_path: str | None = None) -> Settings:
     path = config_path or os.environ.get("CONFIG_PATH", "config.yaml")
-    if not Path(path).exists():
+    resolved = Path(path)
+
+    if resolved.is_dir():
+        # Bind mount di un file su un host dove quel file non esiste ancora:
+        # Docker (e Unraid allo stesso modo) crea silenziosamente una
+        # directory vuota al suo posto invece di dare errore. Capita spesso
+        # al primo avvio se config.yaml non è stato creato prima sull'host.
+        raise NotADirectoryError(
+            f"{path} è una directory, non un file: probabile bind mount di un "
+            "config.yaml che non esisteva ancora sull'host. Crea il file "
+            "config.yaml (copiando config.example.yaml) sull'host PRIMA di "
+            "avviare il container, poi ricrea il container."
+        )
+    if not resolved.exists():
         raise FileNotFoundError(
             f"File di configurazione non trovato: {path}. "
             "Copia config.example.yaml in config.yaml e adattalo ai mount reali."
