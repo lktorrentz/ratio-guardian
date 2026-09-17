@@ -114,7 +114,13 @@ resolve(file_path: str, content_type: Literal["movie","tv"]) -> MediaItem
 - `GET /api/torrents/filter?tmdbId=...&categories[]=...` — ricerca per TMDB ID, filtri opzionali aggiuntivi (risoluzione, categoria, ecc.)
 - `GET /api/torrents/:id` — dettaglio singolo torrent
 - `GET /api/user` — **solo statistiche aggregate** dell'utente (upload/download totali, ratio, hit&run). **Non** restituisce la lista dei torrent scaricati/in storico.
-- Autenticazione: `api_token` come query string, form param, o Bearer token — a scelta.
+- Autenticazione: `api_token` come query string, form param, o Bearer token — a scelta. Verificato funzionante con Bearer token contro un'istanza reale (ITT).
+
+**Shape della risposta verificato (ITT, 2026-09-17)**:
+- `/api/torrents/filter` → `{"data": [{"type": "torrent", "id": "...", "attributes": {...}}, ...]}`
+- `/api/torrents/:id` → `{"type": "torrent", "id": "...", "attributes": {...}}` — **senza** wrapper `data` (diverso dalla lista)
+- `attributes` include: `name`, `size` (bytes), `num_file`, `files: [{name, size, ...}]`, `media_info` (output testuale grezzo di mediainfo, non strutturato), `tmdb_id`, `imdb_id`, `tvdb_id`, `category_id`, `type_id`, `resolution_id`, `download_link` (URL autenticato al `.torrent`)
+- **`info_hash` non è esposto da nessuno dei due endpoint** — solo `download_link`. `TorrentCandidate.info_hash` resta sempre `None` da questo adapter; il contratto lo prevedeva già come opzionale.
 
 ### Limite noto: nessuna API pubblica per lo storico personale
 
@@ -140,7 +146,7 @@ Pipeline per ogni `media_item`:
 1. Se `get_own_history()` disponibile → cerca match diretto per `tmdb_id` (+ season/episode). Se trovato → `source=history`, `confidence` massima.
 2. Altrimenti (o in aggiunta, per cross-seed) → `search_by_tmdb(tmdb_id)` sul catalogo, poi per ogni candidato:
    - confronto dimensione file (`size_match`)
-   - se le dimensioni combaciano, calcolo/confronto Unique ID mediainfo (`mediainfo_match`) — **attenzione**: l'Unique ID pubblicato dai tracker UNIT3D è tipicamente relativo al solo stream video, non all'intero file/container. Due release con stesso video ma audio diverso (es. doppiaggi diversi) possono avere lo stesso Unique ID pur essendo file diversi. Trattare quindi il match come **candidato forte**, mai come certezza assoluta.
+   - se le dimensioni combaciano, calcolo/confronto Unique ID mediainfo (`mediainfo_match`) — **attenzione**: l'Unique ID pubblicato dai tracker UNIT3D (estratto testualmente dal blob `media_info`, sezione **General**, cioè a livello di intero container — verificato contro un'istanza reale, non del solo stream video come inizialmente ipotizzato) può comunque non discriminare release con stesso video ma audio diverso (es. doppiaggi diversi) se il muxer lo ricalcola sull'intero file. Trattare quindi il match come **candidato forte**, mai come certezza assoluta. Nota anche che alcune release (es. disco BD completo, cartella `BDMV/...`) non hanno affatto un singolo Unique ID riconducibile: gestire il caso `mediainfo_unique_id is None` senza considerarlo un errore.
 3. Calcolo `confidence` esplicito e spiegabile (mai un punteggio ML opaco), es.:
    - `source=history` + tmdb match univoco → confidence 1.0
    - `size_match` + `mediainfo_match` + nome inequivocabile → alta ma non massima
