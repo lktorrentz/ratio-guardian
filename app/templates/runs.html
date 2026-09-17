@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Storico run — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Storico run</h1>
+<p class="text-gray-500 mb-6">Ultimi run (scan + matching + auto-seed).</p>
+
+<div class="bg-white border rounded-lg overflow-hidden">
+    <table class="w-full text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">Tipo</th>
+                <th class="px-4 py-2">Iniziato</th>
+                <th class="px-4 py-2">Finito</th>
+                <th class="px-4 py-2">Scansionati</th>
+                <th class="px-4 py-2">Match</th>
+                <th class="px-4 py-2">Auto-seedati</th>
+                <th class="px-4 py-2">In revisione</th>
+                <th class="px-4 py-2">Errori</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for r in runs %}
+            <tr>
+                <td class="px-4 py-2">{{ r.run_type }}</td>
+                <td class="px-4 py-2 text-xs">{{ r.started_at.strftime("%d/%m/%Y %H:%M") }}</td>
+                <td class="px-4 py-2 text-xs">{{ r.finished_at.strftime("%d/%m/%Y %H:%M") if r.finished_at else "in corso" }}</td>
+                <td class="px-4 py-2 tabular-nums">{{ r.items_scanned or 0 }}</td>
+                <td class="px-4 py-2 tabular-nums">{{ r.matches_found or 0 }}</td>
+                <td class="px-4 py-2 tabular-nums">{{ r.auto_seeded or 0 }}</td>
+                <td class="px-4 py-2 tabular-nums">{{ r.pending_review or 0 }}</td>
+                <td class="px-4 py-2 tabular-nums {{ 'text-red-600 font-medium' if r.errors else '' }}">{{ r.errors or 0 }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="px-4 py-4 text-gray-400 italic">Nessun run ancora eseguito.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

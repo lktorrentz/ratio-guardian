@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Client torrent — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Client torrent</h1>
+<p class="text-gray-500 mb-6">Client qBittorrent usato per aggiungere i torrent e forzare il recheck.</p>
+
+<div class="bg-white border rounded-lg overflow-hidden mb-8">
+    <table class="w-full text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">Label</th>
+                <th class="px-4 py-2">Base URL</th>
+                <th class="px-4 py-2">Utente</th>
+                <th class="px-4 py-2">Password</th>
+                <th class="px-4 py-2">Stato</th>
+                <th class="px-4 py-2">Azioni</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for tc in torrent_clients %}
+            <tr>
+                <td class="px-4 py-2">{{ tc.label }}</td>
+                <td class="px-4 py-2 font-mono text-xs">{{ tc.base_url }}</td>
+                <td class="px-4 py-2 text-xs">{{ tc.username or "—" }}</td>
+                <td class="px-4 py-2 text-xs">{{ "••••••••" if tc.password else "non impostata" }}</td>
+                <td class="px-4 py-2">
+                    <span class="{{ 'text-emerald-700' if tc.enabled else 'text-gray-400' }} text-xs">
+                        {{ "Abilitato" if tc.enabled else "Disabilitato" }}
+                    </span>
+                </td>
+                <td class="px-4 py-2 space-x-2">
+                    <form method="post" action="/config/torrent-clients/{{ tc.id }}/toggle" class="inline">
+                        <button type="submit" class="text-xs text-gray-600 hover:underline">{{ "Disabilita" if tc.enabled else "Abilita" }}</button>
+                    </form>
+                    <form method="post" action="/config/torrent-clients/{{ tc.id }}/delete" class="inline" onsubmit="return confirm('Eliminare il client {{ tc.label }}?')">
+                        <button type="submit" class="text-xs text-red-600 hover:underline">Elimina</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="px-4 py-4 text-gray-400 italic">Nessun client torrent configurato.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="bg-white border rounded-lg p-4 max-w-md">
+    <h2 class="font-medium mb-3">Aggiungi client (qBittorrent)</h2>
+    <form method="post" action="/config/torrent-clients" class="space-y-3">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Label</label>
+            <input name="label" required placeholder="es. qBittorrent" class="w-full border rounded px-2 py-1.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Base URL</label>
+            <input name="base_url" required placeholder="http://localhost:8080" class="w-full border rounded px-2 py-1.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Utente</label>
+            <input name="username" class="w-full border rounded px-2 py-1.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Password</label>
+            <input name="password" type="password" class="w-full border rounded px-2 py-1.5 text-sm">
+        </div>
+        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Aggiungi</button>
+    </form>
+</div>
+{% endblock %}

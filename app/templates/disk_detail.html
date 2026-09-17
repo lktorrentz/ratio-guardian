@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ disk.label }} — Ratio Guardian{% endblock %}
+{% block content %}
+<a href="/config/disks" class="text-xs text-blue-600 hover:underline">&larr; Tutti i dischi</a>
+<h1 class="text-xl font-semibold mt-2 mb-1">{{ disk.label }}</h1>
+<p class="text-gray-500 font-mono text-xs mb-6">{{ disk.root_path }}</p>
+
+{% if warning %}<div class="bg-amber-50 text-amber-800 border border-amber-200 rounded px-3 py-2 text-sm mb-4">{{ warning }}</div>{% endif %}
+{% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-sm mb-4">{{ error }}</div>{% endif %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white border rounded-lg p-4">
+        <h2 class="font-medium mb-2">Verifica disco</h2>
+        <p class="text-xs text-gray-500 mb-3">st_dev attuale: <span class="font-mono">{{ disk.st_dev or "mai verificato" }}</span></p>
+        <form method="post" action="/config/disks/{{ disk.id }}/verify">
+            <button type="submit" class="bg-gray-800 text-white text-sm px-3 py-1.5 rounded hover:bg-gray-900">Verifica</button>
+        </form>
+    </div>
+
+    <div class="bg-white border rounded-lg p-4">
+        <h2 class="font-medium mb-2">Cartella torrent</h2>
+        <p class="text-xs text-gray-500 mb-3">
+            Attuale: <span class="font-mono">{{ ("/" + disk.torrents_rel_path) if disk.torrents_rel_path else "non configurata" }}</span>
+        </p>
+        <form method="post" action="/config/disks/{{ disk.id }}/torrents-path">
+            <div class="tree-browser border rounded p-3 mb-2" data-disk-id="{{ disk.id }}" data-target="torrents_rel_path_input" data-initial-path="{{ disk.torrents_rel_path or '' }}"></div>
+            <input type="hidden" id="torrents_rel_path_input" name="torrents_rel_path" value="{{ disk.torrents_rel_path or '' }}">
+            <button type="submit" class="bg-blue-600 text-white text-sm px-3 py-1.5 rounded hover:bg-blue-700">Salva</button>
+        </form>
+    </div>
+</div>
+
+<h2 class="font-medium mb-3">Media path</h2>
+<div class="bg-white border rounded-lg overflow-hidden mb-6">
+    <table class="w-full text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">Percorso relativo</th>
+                <th class="px-4 py-2">Tipo</th>
+                <th class="px-4 py-2">Stato</th>
+                <th class="px-4 py-2">Azioni</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for mp in media_paths %}
+            <tr>
+                <td class="px-4 py-2 font-mono text-xs">/{{ mp.relative_path }}</td>
+                <td class="px-4 py-2">{{ mp.content_type }}</td>
+                <td class="px-4 py-2">{{ "Abilitata" if mp.enabled else "Disabilitata" }}</td>
+                <td class="px-4 py-2 space-x-2">
+                    <form method="post" action="/config/media-paths/{{ mp.id }}/toggle" class="inline">
+                        <button type="submit" class="text-xs text-gray-600 hover:underline">{{ "Disabilita" if mp.enabled else "Abilita" }}</button>
+                    </form>
+                    <form method="post" action="/config/media-paths/{{ mp.id }}/delete" class="inline" onsubmit="return confirm('Eliminare questa media path?')">
+                        <button type="submit" class="text-xs text-red-600 hover:underline">Elimina</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="px-4 py-4 text-gray-400 italic">Nessuna media path configurata su questo disco.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="bg-white border rounded-lg p-4 max-w-md">
+    <h2 class="font-medium mb-3">Aggiungi media path</h2>
+    <form method="post" action="/config/disks/{{ disk.id }}/media-paths" class="space-y-3">
+        <div class="tree-browser border rounded p-3" data-disk-id="{{ disk.id }}" data-target="relative_path_input"></div>
+        <input type="hidden" id="relative_path_input" name="relative_path">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Tipo contenuto</label>
+            <select name="content_type" class="w-full border rounded px-2 py-1.5 text-sm">
+                <option value="movie">movie</option>
+                <option value="tv">tv</option>
+            </select>
+        </div>
+        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Aggiungi</button>
+    </form>
+</div>
+{% endblock %}

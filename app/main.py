@@ -6,9 +6,12 @@ from fastapi.staticfiles import StaticFiles
 
 from app import db, scheduler as scheduler_module
 from app.api.disks import router as disks_router
+from app.api.media_paths import router as media_paths_router
 from app.api.reviews import router as reviews_api_router
 from app.api.runs import router as runs_router
 from app.api.settings import router as settings_router
+from app.api.torrent_clients import router as torrent_clients_router
+from app.api.trackers import router as trackers_router
 from app.config import load_settings
 from app.web import router as web_router
 
@@ -28,9 +31,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Ratio Guardian", lifespan=lifespan)
 app.include_router(disks_router)
+app.include_router(media_paths_router)
 app.include_router(reviews_api_router)
 app.include_router(runs_router)
 app.include_router(settings_router)
+app.include_router(trackers_router)
+app.include_router(torrent_clients_router)
 app.include_router(web_router)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 

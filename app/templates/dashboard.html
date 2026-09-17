@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-6">Dashboard</h1>
+
+{% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-sm mb-6">{{ error }}</div>{% endif %}
+
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+    <div class="bg-white border rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase">Match in revisione</div>
+        <div class="text-3xl font-semibold mt-1">{{ pending_count }}</div>
+        <a href="/reviews" class="text-xs text-blue-600 hover:underline">Vai alla coda &rarr;</a>
+    </div>
+    <div class="bg-white border rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase">Dischi configurati</div>
+        <div class="text-3xl font-semibold mt-1">{{ disk_count }}</div>
+        <a href="/config/disks" class="text-xs text-blue-600 hover:underline">Gestisci &rarr;</a>
+    </div>
+    <div class="bg-white border rounded-lg p-4">
+        <div class="text-xs text-gray-500 uppercase">Ultimo run</div>
+        {% if last_run %}
+        <div class="text-sm mt-1">{{ last_run.run_type }} — {{ last_run.started_at.strftime("%d/%m %H:%M") }}</div>
+        <div class="text-xs text-gray-500 mt-1">
+            {{ last_run.items_scanned or 0 }} scansionati, {{ last_run.matches_found or 0 }} match,
+            {{ last_run.auto_seeded or 0 }} seedati, {{ last_run.errors or 0 }} errori
+        </div>
+        {% else %}
+        <div class="text-sm text-gray-400 mt-1 italic">Nessun run ancora</div>
+        {% endif %}
+        <a href="/runs" class="text-xs text-blue-600 hover:underline">Storico &rarr;</a>
+    </div>
+</div>
+
+<form method="post" action="/run-now">
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm font-medium">
+        Esegui ora
+    </button>
+</form>
+{% endblock %}

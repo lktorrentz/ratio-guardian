@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Dischi — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Dischi</h1>
+<p class="text-gray-500 mb-6">Dischi fisici configurati (root a livello di mount point).</p>
+
+{% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-sm mb-4">{{ error }}</div>{% endif %}
+
+<div class="bg-white border rounded-lg overflow-hidden mb-8">
+    <table class="w-full text-left">
+        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">Label</th>
+                <th class="px-4 py-2">Root path</th>
+                <th class="px-4 py-2">Cartella torrent</th>
+                <th class="px-4 py-2">Azioni</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for d in disks %}
+            <tr>
+                <td class="px-4 py-2"><a href="/config/disks/{{ d.id }}" class="text-blue-600 hover:underline">{{ d.label }}</a></td>
+                <td class="px-4 py-2 font-mono text-xs">{{ d.root_path }}</td>
+                <td class="px-4 py-2 font-mono text-xs">{{ d.torrents_rel_path or "non configurata" }}</td>
+                <td class="px-4 py-2 space-x-2">
+                    <a href="/config/disks/{{ d.id }}" class="text-xs text-gray-600 hover:underline">Dettagli</a>
+                    <form method="post" action="/config/disks/{{ d.id }}/delete" class="inline"
+                          onsubmit="return confirm('Eliminare il disco {{ d.label }}? I media path collegati verranno eliminati.')">
+                        <button type="submit" class="text-xs text-red-600 hover:underline">Elimina</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="px-4 py-4 text-gray-400 italic">Nessun disco configurato.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="bg-white border rounded-lg p-4 max-w-md">
+    <h2 class="font-medium mb-3">Aggiungi disco</h2>
+    {% if available_mounts %}
+    <form method="post" action="/config/disks" class="space-y-3">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Label</label>
+            <input name="label" required class="w-full border rounded px-2 py-1.5 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Mount point (da config.yaml)</label>
+            <select name="root_path" class="w-full border rounded px-2 py-1.5 text-sm">
+                {% for mount in available_mounts %}
+                <option value="{{ mount }}">{{ mount }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Aggiungi</button>
+    </form>
+    {% else %}
+    <p class="text-sm text-gray-500">Tutti i mount configurati in <code>config.yaml</code> sono già assegnati a un disco.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,23 +1,16 @@
-"""Pagine HTML server-rendered (Jinja2, form pieni — niente JS esterno).
-
-Vedi CLAUDE.md: web UI in Jinja2+HTMX, "niente build frontend pesante".
-Per ora usiamo solo form HTML puri (redirect dopo submit): niente
-dipendenza da una libreria JS esterna da vendorizzare/scaricare da CDN.
-"""
-
-from pathlib import Path
+"""Pagina web della coda di revisione (form pieni, redirect dopo submit —
+vedi CLAUDE.md: niente dipendenza da una libreria JS esterna)."""
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app import review as review_service
 from app.deps import get_session
 from app.models import MatchReview
+from app.web.templates import templates
 
-router = APIRouter(tags=["web"])
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+router = APIRouter()
 
 
 @router.get("/reviews")

@@ -7,8 +7,9 @@ condiviso (app/fs_scope.py), mai duplicato.
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.deps import get_session
@@ -43,11 +44,94 @@ class VerifyResponse(BaseModel):
     warning: str | None = None
 
 
+class DiskCreateRequest(BaseModel):
+    label: str
+    root_path: str
+
+
+class DiskUpdateRequest(BaseModel):
+    label: str | None = None
+    torrents_rel_path: str | None = None
+
+
+class DiskResponse(BaseModel):
+    id: int
+    label: str
+    root_path: str
+    torrents_rel_path: str | None
+    st_dev: int | None
+
+    @classmethod
+    def from_model(cls, disk: Disk) -> "DiskResponse":
+        return cls(
+            id=disk.id, label=disk.label, root_path=disk.root_path,
+            torrents_rel_path=disk.torrents_rel_path, st_dev=disk.st_dev,
+        )
+
+
+class DiskValidationError(ValueError):
+    pass
+
+
+class DiskConflictError(ValueError):
+    pass
+
+
 def _get_disk_or_404(session: Session, disk_id: int) -> Disk:
     disk = session.get(Disk, disk_id)
     if disk is None:
         raise HTTPException(status_code=404, detail=f"Disco {disk_id} non trovato")
     return disk
+
+
+def is_within_configured_mounts(path: str, configured_mounts: list[str]) -> bool:
+    real = os.path.realpath(path)
+    return any(
+        real == os.path.realpath(mount) or real.startswith(os.path.realpath(mount) + os.sep)
+        for mount in configured_mounts
+    )
+
+
+def create_disk(session: Session, label: str, root_path: str, configured_mounts: list[str]) -> Disk:
+    if not is_within_configured_mounts(root_path, configured_mounts):
+        raise DiskValidationError(
+            "root_path deve corrispondere (o essere contenuto in) uno dei mount configurati in config.yaml"
+        )
+    disk = Disk(label=label, root_path=root_path)
+    session.add(disk)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise DiskConflictError(f"Esiste già un disco con root_path {root_path!r}") from exc
+    return disk
+
+
+def verify_disk(session: Session, disk: Disk) -> VerifyResponse:
+    if not os.path.isdir(disk.root_path):
+        raise HTTPException(status_code=404, detail=f"root_path non raggiungibile: {disk.root_path}")
+
+    current_st_dev = os.stat(disk.root_path).st_dev
+
+    if disk.st_dev is None:
+        # Prima verifica: non c'è nulla con cui confrontare, stabiliamo la baseline.
+        disk.st_dev = current_st_dev
+        session.commit()
+        return VerifyResponse(consistent=True)
+
+    if current_st_dev != disk.st_dev:
+        # Non sovrascriviamo mai silenziosamente: st_dev cambiato = possibile
+        # rimonto/sostituzione del disco (vedi docs/SPEC.md sezione 3).
+        return VerifyResponse(
+            consistent=False,
+            warning=(
+                f"st_dev cambiato per il disco '{disk.label}' "
+                f"({disk.st_dev} -> {current_st_dev}): possibile disco rimontato "
+                "o sostituito. Verificare prima di procedere con hardlink."
+            ),
+        )
+
+    return VerifyResponse(consistent=True)
 
 
 def _relative_to_root(root_path: str, candidate: str) -> str:
@@ -96,27 +180,38 @@ def mkdir(disk_id: int, body: MkdirRequest, session: Session = Depends(get_sessi
 @router.post("/{disk_id}/verify", response_model=VerifyResponse)
 def verify(disk_id: int, session: Session = Depends(get_session)):
     disk = _get_disk_or_404(session, disk_id)
-    if not os.path.isdir(disk.root_path):
-        raise HTTPException(status_code=404, detail=f"root_path non raggiungibile: {disk.root_path}")
+    return verify_disk(session, disk)
 
-    current_st_dev = os.stat(disk.root_path).st_dev
 
-    if disk.st_dev is None:
-        # Prima verifica: non c'è nulla con cui confrontare, stabiliamo la baseline.
-        disk.st_dev = current_st_dev
-        session.commit()
-        return VerifyResponse(consistent=True)
+@router.get("", response_model=list[DiskResponse])
+def list_disks(session: Session = Depends(get_session)):
+    return [DiskResponse.from_model(d) for d in session.query(Disk).all()]
 
-    if current_st_dev != disk.st_dev:
-        # Non sovrascriviamo mai silenziosamente: st_dev cambiato = possibile
-        # rimonto/sostituzione del disco (vedi docs/SPEC.md sezione 3).
-        return VerifyResponse(
-            consistent=False,
-            warning=(
-                f"st_dev cambiato per il disco '{disk.label}' "
-                f"({disk.st_dev} -> {current_st_dev}): possibile disco rimontato "
-                "o sostituito. Verificare prima di procedere con hardlink."
-            ),
-        )
 
-    return VerifyResponse(consistent=True)
+@router.post("", response_model=DiskResponse, status_code=201)
+def create_disk_endpoint(body: DiskCreateRequest, request: Request, session: Session = Depends(get_session)):
+    try:
+        disk = create_disk(session, body.label, body.root_path, request.app.state.settings.disks)
+    except DiskValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DiskConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return DiskResponse.from_model(disk)
+
+
+@router.patch("/{disk_id}", response_model=DiskResponse)
+def update_disk(disk_id: int, body: DiskUpdateRequest, session: Session = Depends(get_session)):
+    disk = _get_disk_or_404(session, disk_id)
+    if body.label is not None:
+        disk.label = body.label
+    if body.torrents_rel_path is not None:
+        disk.torrents_rel_path = body.torrents_rel_path or None
+    session.commit()
+    return DiskResponse.from_model(disk)
+
+
+@router.delete("/{disk_id}", status_code=204)
+def delete_disk(disk_id: int, session: Session = Depends(get_session)):
+    disk = _get_disk_or_404(session, disk_id)
+    session.delete(disk)
+    session.commit()

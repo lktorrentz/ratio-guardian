@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Impostazioni — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Impostazioni</h1>
+<p class="text-gray-500 mb-6">Configurazione dinamica, editabile senza restart.</p>
+
+{% if error %}<div class="bg-red-50 text-red-700 border border-red-200 rounded px-3 py-2 text-sm mb-4">{{ error }}</div>{% endif %}
+{% if saved %}<div class="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-3 py-2 text-sm mb-4">Impostazioni salvate.</div>{% endif %}
+
+<form method="post" action="/config/settings" class="bg-white border rounded-lg p-4 max-w-md space-y-4">
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">Soglia confidence per l'auto-approvazione (0.0–1.0)</label>
+        <input name="confidence_threshold_auto" type="number" step="0.01" min="0" max="1"
+               value="{{ confidence_threshold_auto }}" class="w-full border rounded px-2 py-1.5 text-sm">
+    </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">Schedulazione (espressione cron a 5 campi, vuoto = disabilitata)</label>
+        <input name="schedule_cron" placeholder="0 4 * * *" value="{{ schedule_cron }}"
+               class="w-full border rounded px-2 py-1.5 text-sm font-mono">
+    </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">TMDB API key {{ "(già impostata)" if has_tmdb_api_key else "(non impostata)" }}</label>
+        <input name="tmdb_api_key" type="password" placeholder="{{ 'lascia vuoto per non modificare' if has_tmdb_api_key else '' }}"
+               class="w-full border rounded px-2 py-1.5 text-sm">
+    </div>
+    <button type="submit" class="bg-blue-600 text-white text-sm px-4 py-1.5 rounded hover:bg-blue-700">Salva</button>
+</form>
+{% endblock %}
