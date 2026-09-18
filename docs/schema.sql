@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS candidate (
 
 CREATE TABLE IF NOT EXISTS match_review (
     id              INTEGER PRIMARY KEY,
-    candidate_id    INTEGER NOT NULL REFERENCES candidate(id),
+    candidate_id    INTEGER NOT NULL REFERENCES candidate(id) ON DELETE CASCADE,
     status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','approved','rejected','auto_approved')),
     decided_by      TEXT,                   -- "system" | username
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS match_review (
 
 CREATE TABLE IF NOT EXISTS seed_job (
     id                      INTEGER PRIMARY KEY,
-    candidate_id            INTEGER NOT NULL REFERENCES candidate(id),
+    candidate_id            INTEGER NOT NULL REFERENCES candidate(id) ON DELETE CASCADE,
     hardlink_path           TEXT,                   -- file singolo: path del file; pack: cartella contenitore
     hardlink_created_at     TIMESTAMP,
     torrent_added_at        TIMESTAMP,

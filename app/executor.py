@@ -360,6 +360,20 @@ def reconcile_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClie
     return seed_job
 
 
+def _walk_matching_inode(source_stat: os.stat_result, search_root: str) -> list[str]:
+    found: list[str] = []
+    for dirpath, _dirnames, filenames in os.walk(search_root):
+        for name in filenames:
+            candidate_path = os.path.join(dirpath, name)
+            try:
+                other_stat = os.stat(candidate_path)
+            except OSError:
+                continue
+            if other_stat.st_dev == source_stat.st_dev and other_stat.st_ino == source_stat.st_ino:
+                found.append(candidate_path)
+    return found
+
+
 def _already_seeding(source_path: str, torrents_root: str) -> str | None:
     """Vedi docs/SPEC.md sezione 10 punto 1: se nlink>1, cerca dentro
     torrents_root un file con lo stesso (st_dev, st_ino) del sorgente."""
@@ -369,17 +383,23 @@ def _already_seeding(source_path: str, torrents_root: str) -> str | None:
         return None
     if source_stat.st_nlink <= 1:
         return None
+    matches = _walk_matching_inode(source_stat, torrents_root)
+    return matches[0] if matches else None
 
-    for dirpath, _dirnames, filenames in os.walk(torrents_root):
-        for name in filenames:
-            candidate_path = os.path.join(dirpath, name)
-            try:
-                other_stat = os.stat(candidate_path)
-            except OSError:
-                continue
-            if other_stat.st_dev == source_stat.st_dev and other_stat.st_ino == source_stat.st_ino:
-                return candidate_path
-    return None
+
+def find_existing_hardlinks(source_path: str, search_root: str) -> list[str]:
+    """Tutti i path dentro search_root che condividono lo stesso inode del
+    file locale — sola lettura, usata dalla preview della coda di revisione
+    (app/web/reviews.py) per mostrare dove sono già gli altri collegamenti.
+    NON sostituisce _already_seeding(): quella resta l'unica verifica usata
+    prima di un vero hardlink."""
+    try:
+        source_stat = os.stat(source_path)
+    except OSError:
+        return []
+    if source_stat.st_nlink <= 1:
+        return []
+    return _walk_matching_inode(source_stat, search_root)
 
 
 def _check_same_filesystem(source_path: str, torrents_root: str) -> None:

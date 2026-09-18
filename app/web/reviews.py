@@ -7,6 +7,7 @@ vedi app/review.py. Mostra anche le esecuzioni fallite in precedenza, con
 retry singolo o in blocco."""
 
 import json
+import os
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
@@ -14,11 +15,18 @@ from sqlalchemy.orm import Session
 
 from app import review as review_service
 from app.deps import get_session
-from app.executor import ExecutionError
+from app.executor import ExecutionError, find_existing_hardlinks
+from app.fs_scope import ScopeViolation, resolve_scoped
 from app.models import Disk, MatchReview, MediaPath, RunLog, SeedJob
+from app.scanner import VIDEO_EXTENSIONS
+from app.season_pack import map_pack_files_by_episode
 from app.web.templates import templates
 
 router = APIRouter()
+
+
+def _is_video(filename: str) -> bool:
+    return any(filename.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
 
 
 def _group_reviews(reviews: list[MatchReview]) -> list[list[MatchReview]]:
@@ -41,31 +49,70 @@ def _group_reviews(reviews: list[MatchReview]) -> list[list[MatchReview]]:
     return [groups[key] for key in order]
 
 
+def _file_row(review: MatchReview, video_files: list[str], filename_by_episode: dict[int, str]) -> dict:
+    """Una riga di card per un file del gruppo (un episodio del pack, o
+    l'unico file per un film) — path locale, dimensione, dove finirà il
+    NUOVO hardlink, ed eventuali collegamenti già esistenti altrove
+    (find_existing_hardlinks, sola lettura, mai usata per decidere se
+    eseguire davvero)."""
+    candidate = review.candidate
+    media_item = candidate.media_item
+    disk = media_item.media_path.disk
+
+    filename = filename_by_episode.get(media_item.episode_number) if filename_by_episode else None
+    if filename is None and len(video_files) == 1:
+        filename = video_files[0]
+
+    # target_path riflette dove finirà il NUOVO hardlink (sottocartella
+    # per-libreria se configurata, vedi MediaPath.effective_new_torrent_rel_path)
+    # — non va confuso con disk.torrents_rel_path, che è invece dove si
+    # cerca "già in seeding" (sempre l'intera cartella torrent del disco).
+    new_torrent_rel_path = media_item.media_path.effective_new_torrent_rel_path
+    target_path = None
+    if new_torrent_rel_path and filename:
+        relative = os.path.join(candidate.folder, filename) if candidate.folder else filename
+        target_path = f"/{new_torrent_rel_path}/{relative}"
+
+    existing_links: list[str] = []
+    if disk.torrents_rel_path:
+        try:
+            scan_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
+        except ScopeViolation:
+            scan_root = None
+        if scan_root and os.path.isdir(scan_root):
+            existing_links = find_existing_hardlinks(media_item.file_path, scan_root)
+
+    return {
+        "file_path": media_item.file_path,
+        "size_bytes": media_item.size_bytes,
+        "target_path": target_path,
+        "torrents_configured": bool(disk.torrents_rel_path),
+        "existing_links": existing_links,
+    }
+
+
 def _review_group_view(group: list[MatchReview]) -> dict:
     """Espande un gruppo di review (stesso torrent, vedi _group_reviews)
     con quello che serve a capire, a colpo d'occhio, COSA farà davvero
     un'approvazione — richiesto esplicitamente dopo che non era chiaro
     se/dove sarebbe stato creato un nuovo hardlink. Per un pack che copre
     più episodi, l'azione (approve/reject) sull'id della prima review del
-    gruppo si propaga a tutte le altre (vedi app/review.py)."""
+    gruppo si propaga a tutte le altre (vedi app/review.py). Una riga per
+    ogni file del gruppo, mai un'unica riga aggregata — un film ha
+    ovviamente un solo file."""
     primary = group[0]
     candidate = primary.candidate
-    media_items = [r.candidate.media_item for r in group]
-    media_path = media_items[0].media_path
-    disk = media_path.disk
-    # target_path riflette dove finirà il NUOVO hardlink (sottocartella
-    # per-libreria se configurata, vedi MediaPath.effective_new_torrent_rel_path)
-    # — non va confuso con disk.torrents_rel_path, che è invece dove si
-    # cerca "già in seeding" (sempre l'intera cartella torrent del disco).
-    new_torrent_rel_path = media_path.effective_new_torrent_rel_path
     file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
+    video_files = [f for f in file_list if _is_video(f)]
 
-    target_path = None
-    if new_torrent_rel_path:
-        if candidate.folder:
-            target_path = f"/{new_torrent_rel_path}/{candidate.folder}/  ({len(file_list)} file)"
-        elif file_list:
-            target_path = f"/{new_torrent_rel_path}/{file_list[0]}"
+    filename_by_episode: dict[int, str] = {}
+    if len(video_files) > 1:
+        try:
+            filename_by_episode = map_pack_files_by_episode(video_files)
+        except ValueError:
+            filename_by_episode = {}
+
+    files = [_file_row(r, video_files, filename_by_episode) for r in group]
 
     # Ogni review del gruppo ha la propria confidence (calcolata sul
     # confronto per-episodio dentro il pack, non su un unico valore
@@ -80,14 +127,12 @@ def _review_group_view(group: list[MatchReview]) -> dict:
         "primary_review_id": primary.id,
         "candidate": candidate,
         "is_pack": len(group) > 1,
-        "file_paths": [mi.file_path for mi in media_items],
+        "files": files,
         "confidence": min(confidences),
         "all_auto_approved": all_auto_approved,
         "ambiguity_reasons": sorted({r.candidate.ambiguity_reason for r in group if r.candidate.ambiguity_reason}),
-        "target_path": target_path,
-        "torrents_configured": bool(disk.torrents_rel_path),
-        "max_nlink": max((mi.nlink or 0) for mi in media_items),
-        "already_linked_elsewhere": any((mi.nlink or 0) > 1 for mi in media_items),
+        "torrents_configured": all(f["torrents_configured"] for f in files),
+        "already_linked_elsewhere": any(f["existing_links"] for f in files),
     }
 
 

@@ -181,8 +181,20 @@ class Candidate(Base):
 
     media_item: Mapped["MediaItem"] = relationship(back_populates="candidates")
     tracker: Mapped["Tracker"] = relationship(back_populates="candidates")
-    match_reviews: Mapped[list["MatchReview"]] = relationship(back_populates="candidate")
-    seed_jobs: Mapped[list["SeedJob"]] = relationship(back_populates="candidate")
+    # cascade esplicito lato ORM: match_review.candidate_id e
+    # seed_job.candidate_id sono NOT NULL senza ON DELETE CASCADE nello
+    # schema (docs/schema.sql, non alterabile su un DB SQLite già creato).
+    # Senza questo cascade, eliminare un Candidate (a cascata da MediaItem/
+    # MediaPath/Disk) fa fallire il commit con un IntegrityError perché
+    # SQLAlchemy prova a mettere a NULL candidate_id sui figli invece di
+    # cancellarli — era la causa per cui eliminare un disco dalla UI
+    # falliva sempre non appena aveva almeno un match_review/seed_job.
+    match_reviews: Mapped[list["MatchReview"]] = relationship(
+        back_populates="candidate", cascade="all, delete-orphan"
+    )
+    seed_jobs: Mapped[list["SeedJob"]] = relationship(
+        back_populates="candidate", cascade="all, delete-orphan"
+    )
 
 
 class MatchReview(Base):

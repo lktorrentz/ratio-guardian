@@ -13,10 +13,10 @@
     {% endif %}
 </div>
 <p class="text-gray-500 mb-4">
-    Approvare crea un hardlink nella colonna "Azione" qui sotto e aggiunge quel torrent al client — mai un'operazione
-    già fatta in precedenza. Nessun hardlink o seeding avviene senza conferma qui, nemmeno per i match ad alta confidence.
-    Un season pack che copre più episodi orfani è UNA sola riga/decisione: approvarla crea la cartella e collega
-    tutti i file al suo interno insieme, prima di aggiungere il torrent.
+    Approvare crea gli hardlink indicati come "Nuovo link" qui sotto e aggiunge quel torrent al client — mai
+    un'operazione già fatta in precedenza. Nessun hardlink o seeding avviene senza conferma qui, nemmeno per i match
+    ad alta confidence. Un season pack che copre più episodi orfani è UNA sola card/decisione: approvarla crea la
+    cartella e collega tutti i file al suo interno insieme, prima di aggiungere il torrent.
 </p>
 
 {% if disks_missing_torrents_path %}
@@ -38,77 +38,71 @@
 </div>
 {% endif %}
 
+{% macro size_mb(bytes) -%}
+{{ "%.1f"|format(bytes / 1000000) }} MB
+{%- endmacro %}
+
 {% if review_views %}
-<div class="bg-white border rounded-lg overflow-hidden">
-    <table class="w-full text-left">
-        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
-            <tr>
-                <th class="px-4 py-2">File locale</th>
-                <th class="px-4 py-2">Stato attuale</th>
-                <th class="px-4 py-2">Torrent candidato</th>
-                <th class="px-4 py-2">Confidence</th>
-                <th class="px-4 py-2">Azione se approvi</th>
-                <th class="px-4 py-2">Azioni</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y">
-            {% for rv in review_views %}
-            <tr>
-                <td class="px-4 py-2 font-mono text-xs break-all">
-                    {% if rv.is_pack %}
-                    <span class="font-sans text-gray-500">Pack, {{ rv.file_paths|length }} episodi:</span>
-                    <ul class="mt-1 space-y-0.5">
-                        {% for path in rv.file_paths %}
-                        <li>{{ path }}</li>
-                        {% endfor %}
-                    </ul>
+<div class="space-y-4">
+    {% for rv in review_views %}
+    <div class="bg-white border rounded-lg overflow-hidden">
+        <div class="px-4 py-3 flex items-start justify-between gap-4 border-b bg-gray-50">
+            <div class="min-w-0">
+                <div class="font-medium truncate">{{ rv.candidate.name }}</div>
+                <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                    {% if rv.all_auto_approved %}
+                    <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">Alta confidence</span>
                     {% else %}
-                    {{ rv.file_paths[0] }}
+                    <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Da verificare</span>
                     {% endif %}
-                </td>
-                <td class="px-4 py-2 text-xs">
+                    {% for reason in rv.ambiguity_reasons %}
+                    <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ reason }}</span>
+                    {% endfor %}
                     {% if rv.already_linked_elsewhere %}
-                    <span class="text-red-700">⚠ nlink={{ rv.max_nlink }} — sembra già collegato altrove, verifica prima di approvare</span>
-                    {% else %}
-                    <span class="text-gray-500">non collegato{{ " (nessun file del pack)" if rv.is_pack else "" }}</span>
+                    <span class="text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded">⚠ già collegato altrove, verifica</span>
                     {% endif %}
-                </td>
-                <td class="px-4 py-2">
-                    {{ rv.candidate.name }}
-                    <div class="mt-1">
-                        {% if rv.all_auto_approved %}
-                        <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">Alta confidence</span>
-                        {% else %}
-                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Da verificare</span>
-                        {% endif %}
-                        {% for reason in rv.ambiguity_reasons %}
-                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ reason }}</span>
-                        {% endfor %}
-                    </div>
-                </td>
-                <td class="px-4 py-2 tabular-nums">
-                    {{ "%.2f"|format(rv.confidence) }}{{ " (min)" if rv.is_pack else "" }}
-                </td>
-                <td class="px-4 py-2 font-mono text-xs break-all">
-                    {% if rv.target_path %}
-                    {{ rv.target_path }}
-                    {% else %}
-                    <span class="text-red-700 font-sans">cartella torrent non configurata sul disco — impossibile creare l'hardlink</span>
+                    <span class="text-xs text-gray-400">confidence {{ "%.2f"|format(rv.confidence) }}{{ " (min)" if rv.is_pack else "" }}</span>
+                    {% if rv.is_pack %}
+                    <span class="text-xs text-gray-400">· {{ rv.files|length }} episodi</span>
                     {% endif %}
-                </td>
-                <td class="px-4 py-2 whitespace-nowrap align-top">
-                    <form method="post" action="/reviews/{{ rv.primary_review_id }}/approve" class="inline"
-                          {% if rv.is_pack %}onsubmit="return confirm('Approvare l\'intero pack ({{ rv.file_paths|length }} episodi)?')"{% endif %}>
-                        <button type="submit" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded hover:bg-emerald-700">Approva{{ " pack" if rv.is_pack else "" }}</button>
-                    </form>
-                    <form method="post" action="/reviews/{{ rv.primary_review_id }}/reject" class="inline" onsubmit="return confirm('Rifiutare questo match{{ ' (intero pack)' if rv.is_pack else '' }}?')">
-                        <button type="submit" class="bg-red-600 text-white text-xs px-3 py-1.5 rounded hover:bg-red-700">Rifiuta</button>
-                    </form>
-                </td>
-            </tr>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 whitespace-nowrap">
+                <form method="post" action="/reviews/{{ rv.primary_review_id }}/approve" class="inline"
+                      {% if rv.is_pack %}onsubmit="return confirm('Approvare l\'intero pack ({{ rv.files|length }} episodi)?')"{% endif %}>
+                    <button type="submit" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded hover:bg-emerald-700">Approva{{ " pack" if rv.is_pack else "" }}</button>
+                </form>
+                <form method="post" action="/reviews/{{ rv.primary_review_id }}/reject" class="inline" onsubmit="return confirm('Rifiutare questo match{{ ' (intero pack)' if rv.is_pack else '' }}?')">
+                    <button type="submit" class="bg-red-600 text-white text-xs px-3 py-1.5 rounded hover:bg-red-700">Rifiuta</button>
+                </form>
+            </div>
+        </div>
+        <div class="divide-y">
+            {% for f in rv.files %}
+            <div class="px-4 py-2 text-xs">
+                <div class="flex items-center justify-between gap-4">
+                    <span class="font-mono break-all">{{ f.file_path }}</span>
+                    <span class="text-gray-400 whitespace-nowrap">{{ size_mb(f.size_bytes) }}</span>
+                </div>
+                {% if f.target_path %}
+                <div class="flex items-center gap-2 mt-1">
+                    <span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">Nuovo link</span>
+                    <span class="font-mono break-all text-gray-500">{{ f.target_path }}</span>
+                </div>
+                {% else %}
+                <div class="mt-1 text-red-700">cartella torrent non configurata sul disco — impossibile creare l'hardlink</div>
+                {% endif %}
+                {% for link in f.existing_links %}
+                <div class="flex items-center gap-2 mt-1">
+                    <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">Già collegato</span>
+                    <span class="font-mono break-all text-gray-500">{{ link }}</span>
+                </div>
+                {% endfor %}
+            </div>
             {% endfor %}
-        </tbody>
-    </table>
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% else %}
 <p class="text-gray-400 italic">Nessun match in attesa di conferma.</p>
