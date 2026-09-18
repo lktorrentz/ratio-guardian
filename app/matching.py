@@ -7,6 +7,7 @@ Vedi docs/SPEC.md sezioni 8-9.
 
 import json
 import logging
+import os
 from collections.abc import Callable
 
 from sqlalchemy.orm import Session
@@ -148,15 +149,21 @@ def match_media_item(
         is_pack = sum(1 for f in (tc.file_list or []) if _is_video(f)) > 1
         mediainfo_match = None
 
-        # Il mediainfo del tracker (attrs.media_info) è UN SOLO blob per
-        # l'intero torrent: per un season pack non c'è modo di sapere a
-        # quale file dei tanti si riferisca, quindi non va mai confrontato
-        # con l'unique id del singolo episodio locale (rischio di un falso
-        # match o un falso mismatch) — vedi _effective_candidate_size.
-        if size_match and not is_pack:
-            local_unique_id = _get_local_unique_id(session, media_item)
-            if local_unique_id is not None and tc.mediainfo_unique_id is not None:
-                mediainfo_match = local_unique_id == tc.mediainfo_unique_id
+        if size_match:
+            if is_pack:
+                # Il blob mediainfo del tracker per un pack è la
+                # concatenazione dei report per-file: isoliamo quello
+                # dell'episodio cercato per nome invece di confrontare
+                # alla cieca contro il primo file del pack — vedi
+                # _pack_mediainfo_match. Non può mai valere False: un
+                # confronto non riuscito non è prova di un mismatch, mai
+                # un motivo per abbassare una confidence già raggiunta
+                # via dimensione (a differenza del caso file singolo).
+                mediainfo_match = _pack_mediainfo_match(session, media_item, tc)
+            else:
+                local_unique_id = _get_local_unique_id(session, media_item)
+                if local_unique_id is not None and tc.mediainfo_unique_id is not None:
+                    mediainfo_match = local_unique_id == tc.mediainfo_unique_id
 
         confidence, ambiguity_reason = _score(media_item, tc, size_match, mediainfo_match, effective_sizes)
 
@@ -224,14 +231,20 @@ def _score(
     same_size_count = sum(1 for s in effective_sizes if s is not None and s == media_item.size_bytes)
     unambiguous_size = same_size_count == 1
 
+    # Un mediainfo_match=True conclusivo vale la fascia massima anche per
+    # un season pack: è stato verificato proprio contro il file
+    # dell'episodio cercato (vedi _pack_mediainfo_match), non contro il
+    # pack nel suo insieme — niente motivo per tenerlo in una fascia più
+    # bassa solo perché è un pack, se l'evidenza è forte quanto quella di
+    # un file singolo.
+    if mediainfo_match is True and unambiguous_size:
+        return CONFIDENCE_SIZE_AND_MEDIAINFO_MATCH, None
+
     ambiguity_reason = None
     if media_item.episode_number is not None:
         video_file_count = sum(1 for name in (tc.file_list or []) if _is_video(name))
         if video_file_count > 1:
             ambiguity_reason = "season_pack_partial"
-
-    if mediainfo_match is True and unambiguous_size and ambiguity_reason is None:
-        return CONFIDENCE_SIZE_AND_MEDIAINFO_MATCH, None
 
     if ambiguity_reason is None and not unambiguous_size:
         ambiguity_reason = "multiple_size_matches"
@@ -261,6 +274,37 @@ def _effective_candidate_size(tc: TorrentCandidate, media_item: MediaItem) -> in
         return None
     filename = pack_map.get(media_item.episode_number)
     return tc.file_sizes.get(filename) if filename is not None else None
+
+
+def _pack_mediainfo_match(session: Session, media_item: MediaItem, tc: TorrentCandidate) -> bool | None:
+    """Confronta l'Unique ID mediainfo del SOLO file dell'episodio cercato
+    dentro il pack (tc.mediainfo_unique_ids_by_filename, estratto dal blob
+    concatenato del tracker — vedi Unit3dTrackerAdapter) con quello locale.
+    Ritorna True solo per un match conclusivo, altrimenti sempre None (MAI
+    False): un'estrazione fallita, un nome non trovato, o l'assenza del
+    campo per quel file non sono prova di un mismatch — a differenza del
+    caso file singolo, qui non deve mai abbassare una confidence già
+    raggiunta via dimensione, solo eventualmente alzarla."""
+    video_files = [f for f in (tc.file_list or []) if _is_video(f)]
+    if media_item.episode_number is None:
+        return None
+    try:
+        pack_map = map_pack_files_by_episode(video_files)
+    except ValueError:
+        return None
+    filename = pack_map.get(media_item.episode_number)
+    if filename is None or not tc.mediainfo_unique_ids_by_filename:
+        return None
+
+    tracker_unique_id = tc.mediainfo_unique_ids_by_filename.get(os.path.basename(filename))
+    if tracker_unique_id is None:
+        return None
+
+    local_unique_id = _get_local_unique_id(session, media_item)
+    if local_unique_id is None:
+        return None
+
+    return True if local_unique_id == tracker_unique_id else None
 
 
 def _is_video(filename: str) -> bool:

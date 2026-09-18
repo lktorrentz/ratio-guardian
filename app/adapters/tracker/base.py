@@ -37,6 +37,11 @@ class TorrentCandidate:
     # (es. UNIT3D files[].size) — indispensabile per valutare un season pack:
     # size_bytes è la dimensione dell'INTERO torrent, mai confrontabile con
     # un singolo episodio locale (vedi app/matching.py::_effective_candidate_size).
+    mediainfo_unique_ids_by_filename: dict[str, str] | None = None  # nome file (basename) -> Unique ID,
+    # per i season pack il blob media_info è la concatenazione dei report
+    # per-file: mediainfo_unique_id da solo cattura solo il primo (vedi
+    # Unit3dTrackerAdapter._extract_unique_ids_by_filename e
+    # app/matching.py::_pack_mediainfo_match).
 
 
 @dataclass
@@ -116,11 +121,22 @@ class Unit3dTrackerAdapter(TrackerAdapter):
       intero container), non solo nello stream video come inizialmente
       ipotizzato in docs/SPEC.md sezione 8 — trattarlo comunque come
       candidato forte, mai come certezza assoluta (vedi motore di matching).
+      Per un season pack, questo blob è la CONCATENAZIONE dei report
+      mediainfo di ciascun file del pack (uno per episodio, ognuno con la
+      propria sezione General che include "Complete name": il nome del
+      file a cui quella sezione si riferisce) — mediainfo_unique_id da
+      solo cattura solo il primo Unique ID dell'intero blob (il primo
+      file), _extract_unique_ids_by_filename() li estrae tutti indicizzati
+      per nome file, cosicché il motore di matching possa isolare quello
+      del file dell'episodio cercato invece di quello (sbagliato) del
+      primo file del pack.
     - Rispetta rate_limit_per_min configurato per il tracker; risultati di
       search_by_tmdb cachati in memoria per cache_ttl_seconds.
     """
 
     _UNIQUE_ID_RE = re.compile(r"Unique ID\s*:\s*(\S+)")
+    _GENERAL_SECTION_RE = re.compile(r"(?m)^\s*General\s*$")
+    _COMPLETE_NAME_RE = re.compile(r"Complete name\s*:\s*(.+)")
 
     def __init__(
         self,
@@ -184,6 +200,7 @@ class Unit3dTrackerAdapter(TrackerAdapter):
             folder=attrs.get("folder"),
             download_link=attrs.get("download_link"),
             file_sizes={f["name"]: f["size"] for f in files if "size" in f},
+            mediainfo_unique_ids_by_filename=self._extract_unique_ids_by_filename(attrs.get("media_info")),
         )
 
     @classmethod
@@ -192,3 +209,24 @@ class Unit3dTrackerAdapter(TrackerAdapter):
             return None
         match = cls._UNIQUE_ID_RE.search(media_info)
         return match.group(1) if match else None
+
+    @classmethod
+    def _extract_unique_ids_by_filename(cls, media_info: str | None) -> dict[str, str]:
+        """Un blob media_info di un season pack è la concatenazione dei
+        report mediainfo di ciascun file, ciascuno con la propria sezione
+        General (Complete name + Unique ID). Ritorna {basename: unique_id}
+        per ogni sezione dove entrambi i campi sono presenti — una sezione
+        priva di "Complete name" o "Unique ID" (es. container che non lo
+        espone) è semplicemente esclusa, mai un errore."""
+        if not media_info:
+            return {}
+        result: dict[str, str] = {}
+        # Il primo elemento dello split è il preambolo prima del primo
+        # "General" (vuoto nel caso comune), va scartato.
+        for section in cls._GENERAL_SECTION_RE.split(media_info)[1:]:
+            name_match = cls._COMPLETE_NAME_RE.search(section)
+            id_match = cls._UNIQUE_ID_RE.search(section)
+            if name_match and id_match:
+                filename = re.split(r"[\\/]", name_match.group(1).strip())[-1]
+                result[filename] = id_match.group(1)
+        return result
