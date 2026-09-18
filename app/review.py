@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.adapter_factory import build_torrent_client_adapter
-from app.executor import ExecutionError, execute_candidate, retry_seed_job
+from app.executor import ExecutionError, execute_candidate, reconcile_seed_job, retry_seed_job
 from app.models import Candidate, MatchReview, SeedJob, TorrentClient
 from app.settings_repo import get_setting
 
@@ -240,3 +240,39 @@ def retry_all_failed(session: Session) -> dict[str, int]:
         else:
             succeeded += 1
     return {"succeeded": succeeded, "failed": failed}
+
+
+def reconcile_pending_seed_jobs(session: Session) -> dict[str, int]:
+    """Ricontrolla lo stato reale nel client per ogni seed_job ancora
+    'in_progress' con un info_hash già noto. Colma una lacuna che c'era
+    prima: fuori dal retry di un job fallito, nulla aggiornava mai
+    recheck_status/final_status dopo l'aggiunta iniziale del torrent — un
+    seed_job restava 'in_progress' per sempre nel nostro DB anche se il
+    recheck sul client era concluso da tempo. Chiamata da
+    app/pipeline.py::run_pipeline() a ogni run: è una sola interrogazione
+    di stato per client torrent (mai un hardlink o un add_torrent), quindi
+    non viola in alcun modo la regola "nessuna esecuzione senza conferma
+    umana" — resta comunque l'unica fonte per la pagina Libreria, che
+    legge solo dati cachati invece di interrogare il client a ogni
+    caricamento. Nessun client torrent configurato o nessun seed_job da
+    ricontrollare -> nessun errore, nessuna riga toccata."""
+    adapter = _build_torrent_client_adapter_or_none(session)
+    if adapter is None:
+        return {"reconciled": 0, "errors": 0}
+
+    pending = (
+        session.query(SeedJob)
+        .filter(SeedJob.final_status == "in_progress")
+        .filter(SeedJob.info_hash.isnot(None))
+        .all()
+    )
+    reconciled = 0
+    errors = 0
+    for seed_job in pending:
+        try:
+            reconcile_seed_job(session, seed_job, adapter)
+            reconciled += 1
+        except Exception:
+            logger.exception("Reconcile fallito per seed_job %s", seed_job.id)
+            errors += 1
+    return {"reconciled": reconciled, "errors": errors}

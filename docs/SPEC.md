@@ -165,6 +165,7 @@ Pipeline per ogni `media_item`:
 4. Aggiunta del torrent al client puntando al file appena hardlinkato.
 5. **Recheck forzato, mai `skip_checking`.** È un requisito funzionale non negoziabile: protegge da falsi positivi del matching che altrimenti finirebbero silenziosamente a seedare dati sbagliati.
 6. Se il recheck fallisce → `seed_job.final_status = failed`, motivo esplicito in `error_message`, mai fallimento silente.
+7. **Reconcile periodico**: dopo l'aggiunta, il recheck sul client è asincrono — `seed_job.recheck_status` resta `pending` finché nessuno lo rinterroga. `app/pipeline.py::run_pipeline()` chiama `app/review.py::reconcile_pending_seed_jobs()` a ogni run (dopo il matching, prima di chiudere il run_log): ricontrolla ogni `seed_job` ancora `in_progress` con un `info_hash` noto, una sola interrogazione di stato per client — mai un hardlink o un `add_torrent`, quindi non è "esecuzione" ai fini della regola "nessuna azione senza conferma umana" (sezione 9). Nessun client configurato o nessun seed_job da controllare → no-op silenzioso. Questo è ciò che permette alla pagina Libreria (sezione 11-bis) di leggere sempre uno stato cachato e recente senza interrogare il client a ogni caricamento.
 
 ## 11. Modalità di esecuzione
 
@@ -172,11 +173,21 @@ Pipeline per ogni `media_item`:
 - **Run schedulato**: periodico (cron configurabile da UI), stessa pipeline ma tipicamente su un volume minore di novità.
 - Entrambe le modalità condividono lo stesso motore; la differenza è solo nel trigger e nel volume atteso. Ogni run produce una riga in `run_log` con contatori (scansionati, match trovati, auto-seedati, in review, errori).
 
-## 12. Schema DB
+## 12. Pagina Libreria (storico dei match)
+
+Pagina separata da `/reviews` (mai duplicazione): mostra solo i `match_review` già **decisi** (`approved` o `rejected`), mai `pending`/`auto_approved` — quelli restano esclusivamente nella coda di revisione. Vedi `app/library.py` per la logica, `app/web/library.py` per la pagina.
+
+- **Raggruppamento**: per torrent (stesso `tracker_id` + `torrent_id_remote`), come la coda di revisione — un pack che copre più episodi orfani è UNA riga sola, con la cartella così come la riporta il tracker (`candidate.folder`) e un conteggio episodi, mai un elenco di ogni file collegato. Nessuna distinzione (v1) tra season pack e complete pack: un solo livello di raggruppamento.
+- **Stato**: derivato dal `seed_job` associato al gruppo (solo la review "primaria" al momento dell'approvazione ne ha uno, vedi sezione 9) — `seeding` / `failed` (include `rolled_back`) / `in_progress` / `rejected`. Un caso limite (`unknown`): review approvata ma mai eseguita (es. nessun client torrent configurato al momento) — mostrato esplicitamente, mai spacciato per un esito reale.
+- **Colonne**: disco, path media (path locale per un file singolo, cartella + conteggio episodi per un pack), path torrent (da `seed_job.hardlink_path`), stato hardlink (pill), tracker (link a `{base_url}/torrents/{torrent_id_remote}`, pattern standard UNIT3D non verificato contro ogni istanza), stato/link al client (deep-link verificato contro il routing di VueTorrent `#/torrent/:hash` — la WebUI di default da qBittorrent 5.0; su una WebUI diversa porta comunque alla home, mai a un errore), link TMDB (`/movie/{id}` o `/tv/{id}` a seconda di `content_type`).
+- **Azioni**: "Riprova" per un `failed` (stesso `app/executor.py::retry_seed_job` già usato in `/reviews`, redirect sul filtro `failed`).
+- **Filtro di stato**: query param `?status=`, valori `all|seeding|failed|in_progress|rejected|unknown`.
+
+## 13. Schema DB
 
 Vedi `docs/schema.sql` per lo schema completo (tabelle `disk`, `media_path`, `tracker`, `torrent_client`, `app_settings`, `media_item`, `candidate`, `match_review`, `seed_job`, `run_log`).
 
-## 13. Interfacce adapter (contratti)
+## 14. Interfacce adapter (contratti)
 
 Vedi stub in `app/adapters/*/base.py`. Riassunto dei tre contratti:
 
@@ -184,8 +195,8 @@ Vedi stub in `app/adapters/*/base.py`. Riassunto dei tre contratti:
 - **MediaResolverAdapter**: `resolve(file_path, content_type) -> MediaItem`.
 - **TorrentClientAdapter**: `add_torrent(torrent_file_or_url, save_path, force_recheck=True)`, `get_torrent_status(info_hash)`.
 
-## 14. Cose esplicitamente aperte (non decise in questa sessione)
+## 15. Cose esplicitamente aperte (non decise in questa sessione)
 
-- Libreria esatta per il parsing filename
 - Se/come implementare concretamente lo scraping storico UNIT3D (rischio di fragilità accettato consapevolmente, non un blocco)
-- UI esatta della coda di revisione (mockup non ancora fatto)
+- **Cache persistente del match**: oggi tutto è ancorato a `media_item` (un file fisico in un dato momento) — se un file già collegato viene rimosso dal seeding e ri-orfanato in futuro, si riparte da zero con una ricerca completa sul tracker invece di riconoscere "sappiamo già a quale torrent corrisponde questo contenuto". Richiederebbe un'identità stabile indipendente dal path fisico (es. `tmdb_id` + `season_number` + `episode_number`), decisa esplicitamente di rimandare a un secondo momento rispetto alla Libreria (sezione 12), che per il v1 si appoggia ai dati esistenti.
+- Distinzione season pack vs complete pack nel raggruppamento della Libreria (v1: un solo livello, la cartella così come la riporta il tracker)

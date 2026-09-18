@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Libreria — Ratio Guardian{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Libreria</h1>
+<p class="text-gray-500 mb-4">
+    Storico di tutto ciò che è già stato deciso — seeding, fallito o rifiutato. I match ancora da decidere restano
+    nella <a href="/reviews" class="underline">coda di revisione</a>.
+</p>
+
+<div class="flex flex-wrap gap-2 mb-6">
+    {% for f in status_filters %}
+    <a href="/library?status={{ f }}"
+       class="text-xs px-3 py-1.5 rounded border {% if status == f %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-gray-600 border-gray-200 hover:border-gray-400{% endif %}">
+        {{ "Tutti" if f == "all" else status_labels[f] }}
+    </a>
+    {% endfor %}
+</div>
+
+{% if views %}
+<div class="bg-white border rounded-lg overflow-hidden overflow-x-auto">
+    <table class="w-full text-left text-xs">
+        <thead class="bg-gray-50 uppercase text-gray-500">
+            <tr>
+                <th class="px-4 py-2">Disco</th>
+                <th class="px-4 py-2">Path media</th>
+                <th class="px-4 py-2">Path torrent</th>
+                <th class="px-4 py-2">Stato hardlink</th>
+                <th class="px-4 py-2">Tracker</th>
+                <th class="px-4 py-2">Client</th>
+                <th class="px-4 py-2">TMDB</th>
+                <th class="px-4 py-2">Azioni</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for v in views %}
+            <tr>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    <a href="/config/disks/{{ v.disk.id }}" class="text-blue-600 hover:underline">{{ v.disk.label }}</a>
+                </td>
+                <td class="px-4 py-2 font-mono break-all max-w-xs">{{ v.media_path_display }}</td>
+                <td class="px-4 py-2 font-mono break-all max-w-xs">{{ v.torrent_path_display or "—" }}</td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    {% if v.status == "seeding" %}
+                    <span class="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
+                    {% elif v.status == "failed" %}
+                    <span class="bg-red-50 text-red-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
+                    {% elif v.status == "in_progress" %}
+                    <span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
+                    {% else %}
+                    <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{{ v.status_label }}</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    <a href="{{ v.tracker_url }}" target="_blank" rel="noopener"
+                       class="bg-slate-50 text-slate-700 px-2 py-0.5 rounded hover:underline">{{ v.candidate.tracker.label }} ↗</a>
+                </td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    {% if v.client_url %}
+                    <a href="{{ v.client_url }}" target="_blank" rel="noopener"
+                       class="bg-slate-50 text-slate-700 px-2 py-0.5 rounded hover:underline">Apri ↗</a>
+                    {% else %}
+                    <span class="text-gray-400">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    {% if v.tmdb_url %}
+                    <a href="{{ v.tmdb_url }}" target="_blank" rel="noopener"
+                       class="bg-slate-50 text-slate-700 px-2 py-0.5 rounded hover:underline">TMDB ↗</a>
+                    {% else %}
+                    <span class="text-gray-400">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 whitespace-nowrap">
+                    {% if v.status == "failed" %}
+                    <form method="post" action="/library/failed/{{ v.seed_job.id }}/retry">
+                        <button type="submit" class="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">Riprova</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-gray-400 italic">Nessun match trovato per questo filtro.</p>
+{% endif %}
+{% endblock %}

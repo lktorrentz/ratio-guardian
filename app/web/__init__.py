@@ -5,6 +5,7 @@ from fastapi import APIRouter
 
 from app.web.dashboard import router as dashboard_router
 from app.web.disks import router as disks_router
+from app.web.library import router as library_router
 from app.web.reviews import router as reviews_router
 from app.web.runs import router as runs_router
 from app.web.settings import router as settings_router
@@ -19,6 +20,7 @@ for sub_router in (
     torrent_clients_router,
     settings_router,
     reviews_router,
+    library_router,
     runs_router,
 ):
     router.include_router(sub_router)

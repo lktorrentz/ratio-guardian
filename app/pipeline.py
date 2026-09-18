@@ -20,6 +20,7 @@ from app.adapters.media_resolver.base import MediaResolverAdapter
 from app.adapters.tracker.base import TrackerAdapter
 from app.matching import run_matching
 from app.models import MediaItem, RunLog, Tracker
+from app.review import reconcile_pending_seed_jobs
 from app.scanner import count_enabled_video_files, scan_all_enabled
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,14 @@ def run_pipeline(
             match_totals["pending_review"],
             match_totals["already_seeding"],
         )
+
+        reconcile_totals = reconcile_pending_seed_jobs(session)
+        if reconcile_totals["reconciled"]:
+            logger.info(
+                "Ricontrollati %d seed_job in corso presso il client (%d errori)",
+                reconcile_totals["reconciled"],
+                reconcile_totals["errors"],
+            )
 
         run_log.items_scanned = scan_totals["scanned"]
         run_log.matches_found = match_totals["candidates"]
