@@ -3,11 +3,11 @@
 {% block content %}
 <div class="flex items-center justify-between mb-1">
     <h1 class="text-xl font-semibold">Coda di revisione</h1>
-    {% if reviews %}
+    {% if review_views %}
     <form method="post" action="/reviews/approve-all"
-          onsubmit="return confirm('Approvare ed eseguire l\'hardlink+seed per tutti i {{ reviews|length }} match qui sotto?')">
+          onsubmit="return confirm('Approvare ed eseguire l\'hardlink+seed per tutti i {{ review_views|length }} match qui sotto?')">
         <button type="submit" class="bg-emerald-600 text-white text-sm px-4 py-1.5 rounded hover:bg-emerald-700">
-            Approva tutti ({{ reviews|length }})
+            Approva tutti ({{ review_views|length }})
         </button>
     </form>
     {% endif %}
@@ -15,6 +15,8 @@
 <p class="text-gray-500 mb-4">
     Approvare crea un hardlink nella colonna "Azione" qui sotto e aggiunge quel torrent al client — mai un'operazione
     già fatta in precedenza. Nessun hardlink o seeding avviene senza conferma qui, nemmeno per i match ad alta confidence.
+    Un season pack che copre più episodi orfani è UNA sola riga/decisione: approvarla crea la cartella e collega
+    tutti i file al suo interno insieme, prima di aggiungere il torrent.
 </p>
 
 {% if disks_missing_torrents_path %}
@@ -36,7 +38,7 @@
 </div>
 {% endif %}
 
-{% if reviews %}
+{% if review_views %}
 <div class="bg-white border rounded-lg overflow-hidden">
     <table class="w-full text-left">
         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
@@ -51,30 +53,42 @@
         </thead>
         <tbody class="divide-y">
             {% for rv in review_views %}
-            {% set r = rv.review %}
             <tr>
-                <td class="px-4 py-2 font-mono text-xs break-all">{{ r.candidate.media_item.file_path }}</td>
+                <td class="px-4 py-2 font-mono text-xs break-all">
+                    {% if rv.is_pack %}
+                    <span class="font-sans text-gray-500">Pack, {{ rv.file_paths|length }} episodi:</span>
+                    <ul class="mt-1 space-y-0.5">
+                        {% for path in rv.file_paths %}
+                        <li>{{ path }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    {{ rv.file_paths[0] }}
+                    {% endif %}
+                </td>
                 <td class="px-4 py-2 text-xs">
                     {% if rv.already_linked_elsewhere %}
-                    <span class="text-red-700">⚠ nlink={{ rv.nlink }} — sembra già collegato altrove, verifica prima di approvare</span>
+                    <span class="text-red-700">⚠ nlink={{ rv.max_nlink }} — sembra già collegato altrove, verifica prima di approvare</span>
                     {% else %}
-                    <span class="text-gray-500">non collegato (nlink={{ rv.nlink or 0 }})</span>
+                    <span class="text-gray-500">non collegato{{ " (nessun file del pack)" if rv.is_pack else "" }}</span>
                     {% endif %}
                 </td>
                 <td class="px-4 py-2">
-                    {{ r.candidate.name }}
+                    {{ rv.candidate.name }}
                     <div class="mt-1">
-                        {% if r.status == "auto_approved" %}
+                        {% if rv.all_auto_approved %}
                         <span class="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">Alta confidence</span>
                         {% else %}
                         <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">Da verificare</span>
                         {% endif %}
-                        {% if r.candidate.ambiguity_reason %}
-                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ r.candidate.ambiguity_reason }}</span>
-                        {% endif %}
+                        {% for reason in rv.ambiguity_reasons %}
+                        <span class="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ reason }}</span>
+                        {% endfor %}
                     </div>
                 </td>
-                <td class="px-4 py-2 tabular-nums">{{ "%.2f"|format(r.candidate.confidence) }}</td>
+                <td class="px-4 py-2 tabular-nums">
+                    {{ "%.2f"|format(rv.confidence) }}{{ " (min)" if rv.is_pack else "" }}
+                </td>
                 <td class="px-4 py-2 font-mono text-xs break-all">
                     {% if rv.target_path %}
                     {{ rv.target_path }}
@@ -83,10 +97,11 @@
                     {% endif %}
                 </td>
                 <td class="px-4 py-2 whitespace-nowrap align-top">
-                    <form method="post" action="/reviews/{{ r.id }}/approve" class="inline">
-                        <button type="submit" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded hover:bg-emerald-700">Approva</button>
+                    <form method="post" action="/reviews/{{ rv.primary_review_id }}/approve" class="inline"
+                          {% if rv.is_pack %}onsubmit="return confirm('Approvare l\'intero pack ({{ rv.file_paths|length }} episodi)?')"{% endif %}>
+                        <button type="submit" class="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded hover:bg-emerald-700">Approva{{ " pack" if rv.is_pack else "" }}</button>
                     </form>
-                    <form method="post" action="/reviews/{{ r.id }}/reject" class="inline" onsubmit="return confirm('Rifiutare questo match?')">
+                    <form method="post" action="/reviews/{{ rv.primary_review_id }}/reject" class="inline" onsubmit="return confirm('Rifiutare questo match{{ ' (intero pack)' if rv.is_pack else '' }}?')">
                         <button type="submit" class="bg-red-600 text-white text-xs px-3 py-1.5 rounded hover:bg-red-700">Rifiuta</button>
                     </form>
                 </td>

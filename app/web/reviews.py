@@ -21,13 +21,37 @@ from app.web.templates import templates
 router = APIRouter()
 
 
-def _review_view(review: MatchReview) -> dict:
-    """Espande una review con quello che serve a capire, a colpo d'occhio,
-    COSA farà davvero un'approvazione — richiesto esplicitamente dopo che
-    non era chiaro se/dove sarebbe stato creato un nuovo hardlink."""
-    candidate = review.candidate
-    media_item = candidate.media_item
-    media_path = media_item.media_path
+def _group_reviews(reviews: list[MatchReview]) -> list[list[MatchReview]]:
+    """Raggruppa per (tracker_id, torrent_id_remote): un season pack che
+    copre più episodi orfani produce una review per episodio (stesso
+    torrent, candidate_id diverso — vedi app/matching.py), ma è UNA sola
+    decisione di approvazione/rifiuto (vedi app/review.py::_group_siblings)
+    — mai mostrata come N righe separate azionabili singolarmente, che
+    farebbe pensare a N decisioni indipendenti quando in realtà approvarne
+    una crea comunque l'hardlink dell'intero pack. Un match a file singolo
+    resta semplicemente un gruppo da 1, nessun trattamento speciale."""
+    groups: dict[tuple[int, str], list[MatchReview]] = {}
+    order: list[tuple[int, str]] = []
+    for r in reviews:
+        key = (r.candidate.tracker_id, r.candidate.torrent_id_remote)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+    return [groups[key] for key in order]
+
+
+def _review_group_view(group: list[MatchReview]) -> dict:
+    """Espande un gruppo di review (stesso torrent, vedi _group_reviews)
+    con quello che serve a capire, a colpo d'occhio, COSA farà davvero
+    un'approvazione — richiesto esplicitamente dopo che non era chiaro
+    se/dove sarebbe stato creato un nuovo hardlink. Per un pack che copre
+    più episodi, l'azione (approve/reject) sull'id della prima review del
+    gruppo si propaga a tutte le altre (vedi app/review.py)."""
+    primary = group[0]
+    candidate = primary.candidate
+    media_items = [r.candidate.media_item for r in group]
+    media_path = media_items[0].media_path
     disk = media_path.disk
     # target_path riflette dove finirà il NUOVO hardlink (sottocartella
     # per-libreria se configurata, vedi MediaPath.effective_new_torrent_rel_path)
@@ -43,12 +67,27 @@ def _review_view(review: MatchReview) -> dict:
         elif file_list:
             target_path = f"/{new_torrent_rel_path}/{file_list[0]}"
 
+    # Ogni review del gruppo ha la propria confidence (calcolata sul
+    # confronto per-episodio dentro il pack, non su un unico valore
+    # condiviso — vedi app/matching.py::_score) e il proprio stato
+    # auto_approved/pending: mostriamo il caso peggiore, mai il migliore,
+    # così il badge non promette più di quanto l'evidenza più debole nel
+    # gruppo giustifichi.
+    confidences = [r.candidate.confidence for r in group]
+    all_auto_approved = all(r.status == "auto_approved" for r in group)
+
     return {
-        "review": review,
+        "primary_review_id": primary.id,
+        "candidate": candidate,
+        "is_pack": len(group) > 1,
+        "file_paths": [mi.file_path for mi in media_items],
+        "confidence": min(confidences),
+        "all_auto_approved": all_auto_approved,
+        "ambiguity_reasons": sorted({r.candidate.ambiguity_reason for r in group if r.candidate.ambiguity_reason}),
         "target_path": target_path,
         "torrents_configured": bool(disk.torrents_rel_path),
-        "nlink": media_item.nlink,
-        "already_linked_elsewhere": (media_item.nlink or 0) > 1,
+        "max_nlink": max((mi.nlink or 0) for mi in media_items),
+        "already_linked_elsewhere": any((mi.nlink or 0) > 1 for mi in media_items),
     }
 
 
@@ -71,8 +110,9 @@ def _disks_missing_torrents_path(session: Session) -> list[Disk]:
 @router.get("/reviews")
 def reviews_page(request: Request, session: Session = Depends(get_session)):
     reviews = review_service.list_ready_for_review(session)
-    reviews.sort(key=lambda r: r.candidate.confidence, reverse=True)
-    review_views = [_review_view(r) for r in reviews]
+    groups = _group_reviews(reviews)
+    groups.sort(key=lambda g: min(r.candidate.confidence for r in g), reverse=True)
+    review_views = [_review_group_view(g) for g in groups]
     failed_seed_jobs = review_service.list_failed_seed_jobs(session)
     last_run = (
         session.query(RunLog)
@@ -84,7 +124,6 @@ def reviews_page(request: Request, session: Session = Depends(get_session)):
         request,
         "reviews.html",
         {
-            "reviews": reviews,
             "review_views": review_views,
             "failed_seed_jobs": failed_seed_jobs,
             "last_run": last_run,

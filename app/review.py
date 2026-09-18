@@ -80,18 +80,53 @@ def create_review_for_candidates(session: Session, candidates: list[Candidate]) 
     return review
 
 
+def _group_siblings(session: Session, review: MatchReview) -> list[MatchReview]:
+    """Altre review pronte per lo STESSO torrent (stesso tracker+
+    torrent_id_remote) su un episodio diverso — capita con un season pack
+    che copre più episodi orfani: match_media_item ne crea una per
+    episodio (stesso torrent, candidate_id diverso), ma approvare/
+    rifiutare una di queste è UNA sola decisione ("questo pack sì o no"),
+    mai una per episodio — altrimenti le altre restano visibili come se
+    fossero ancora da decidere anche dopo che l'hardlink dell'intero pack
+    è già stato creato (execute_candidate() lo crea comunque tutto insieme
+    alla prima esecuzione, indipendentemente da quale episodio l'ha
+    innescata — vedi app/executor.py::_execute_season_pack)."""
+    candidate = review.candidate
+    return (
+        session.query(MatchReview)
+        .join(Candidate)
+        .filter(Candidate.tracker_id == candidate.tracker_id)
+        .filter(Candidate.torrent_id_remote == candidate.torrent_id_remote)
+        .filter(MatchReview.id != review.id)
+        .filter(MatchReview.status.in_(READY_FOR_DECISION_STATUSES))
+        .all()
+    )
+
+
 def approve(session: Session, review: MatchReview, decided_by: str = "user") -> MatchReview:
     """Approva e prova subito l'esecuzione (hardlink+seed) se un client
     torrent è configurato. Un fallimento dell'esecuzione non annulla
     l'approvazione: resta approved con il seed_job in stato failed. NOTA:
     non viene ritentata automaticamente qui — un candidate con un seed_job
     (anche fallito) non ricompare più in list_ready_for_review(); compare
-    invece in list_failed_seed_jobs(), con retry_failed() per ritentarlo."""
+    invece in list_failed_seed_jobs(), con retry_failed() per ritentarlo.
+
+    Propaga la decisione a ogni sibling dello stesso pack (_group_siblings):
+    una sola esecuzione (execute_candidate() sulle altre sarebbe comunque
+    un no-op, il file risulterebbe già in seeding), ma tutte le review del
+    gruppo vanno marcate approved esplicitamente, altrimenti resterebbero
+    in coda come se fossero ancora da decidere."""
     review.status = "approved"
     review.decided_by = decided_by
     review.decided_at = datetime.now(timezone.utc)
     session.commit()
     _try_execute(session, review)
+
+    for sibling in _group_siblings(session, review):
+        sibling.status = "approved"
+        sibling.decided_by = decided_by
+        sibling.decided_at = datetime.now(timezone.utc)
+    session.commit()
     return review
 
 
@@ -119,9 +154,18 @@ def _try_execute(session: Session, review: MatchReview) -> None:
 
 
 def reject(session: Session, review: MatchReview, decided_by: str = "user") -> MatchReview:
+    """Rifiuta, propagando la decisione a ogni sibling dello stesso pack
+    (vedi _group_siblings in approve()): è la stessa identica decisione
+    ("questo pack no"), mai una per episodio."""
     review.status = "rejected"
     review.decided_by = decided_by
     review.decided_at = datetime.now(timezone.utc)
+    session.commit()
+
+    for sibling in _group_siblings(session, review):
+        sibling.status = "rejected"
+        sibling.decided_by = decided_by
+        sibling.decided_at = datetime.now(timezone.utc)
     session.commit()
     return review
 
@@ -148,12 +192,21 @@ def list_ready_for_review(session: Session) -> list[MatchReview]:
 
 def approve_all(session: Session, decided_by: str = "user") -> int:
     """Approva ed esegue ogni review pronta (vedi list_ready_for_review).
-    Ritorna quante ne ha processate. Un fallimento su una non blocca le
-    altre — ciascuna resta con il proprio esito (visibile su seed_job)."""
+    Ritorna quanti GRUPPI (vedi _group_siblings) ha processato — per un
+    pack che copre più episodi, approve() marca già approved i sibling
+    quando processa il primo della lista; senza questo controllo li
+    ritenterebbe comunque uno per uno (innocuo, execute_candidate() li
+    troverebbe già in seeding, ma inutile). Un fallimento su un gruppo non
+    blocca gli altri — ciascuno resta con il proprio esito (visibile su
+    seed_job)."""
     reviews = list_ready_for_review(session)
+    processed = 0
     for review in reviews:
+        if review.status not in READY_FOR_DECISION_STATUSES:
+            continue
         approve(session, review, decided_by=decided_by)
-    return len(reviews)
+        processed += 1
+    return processed
 
 
 def list_failed_seed_jobs(session: Session) -> list[SeedJob]:
