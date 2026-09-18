@@ -20,6 +20,7 @@ from app.adapters.tracker.base import (
 from app.mediainfo_util import compute_unique_id
 from app.review import create_review_for_candidates, supersede_reviews_for_media_item
 from app.scanner import VIDEO_EXTENSIONS
+from app.season_pack import map_pack_files_by_episode
 from app.seeding_index import build_seeding_index
 from app.models import Candidate, MediaItem, Tracker
 
@@ -136,18 +137,28 @@ def match_media_item(
         return [candidate]
 
     torrent_candidates = tracker_adapter.search_by_tmdb(media_item.tmdb_id)
+    # Precalcolata una volta per media_item: serve sia al confronto
+    # dimensione per candidato sia a _score() per contare quanti candidati
+    # hanno la stessa dimensione (ambiguità "multiple_size_matches").
+    effective_sizes = [_effective_candidate_size(tc, media_item) for tc in torrent_candidates]
 
     persisted = []
-    for tc in torrent_candidates:
-        size_match = tc.size_bytes == media_item.size_bytes
+    for tc, effective_size in zip(torrent_candidates, effective_sizes):
+        size_match = effective_size is not None and effective_size == media_item.size_bytes
+        is_pack = sum(1 for f in (tc.file_list or []) if _is_video(f)) > 1
         mediainfo_match = None
 
-        if size_match:
+        # Il mediainfo del tracker (attrs.media_info) è UN SOLO blob per
+        # l'intero torrent: per un season pack non c'è modo di sapere a
+        # quale file dei tanti si riferisca, quindi non va mai confrontato
+        # con l'unique id del singolo episodio locale (rischio di un falso
+        # match o un falso mismatch) — vedi _effective_candidate_size.
+        if size_match and not is_pack:
             local_unique_id = _get_local_unique_id(session, media_item)
             if local_unique_id is not None and tc.mediainfo_unique_id is not None:
                 mediainfo_match = local_unique_id == tc.mediainfo_unique_id
 
-        confidence, ambiguity_reason = _score(media_item, tc, size_match, mediainfo_match, torrent_candidates)
+        confidence, ambiguity_reason = _score(media_item, tc, size_match, mediainfo_match, effective_sizes)
 
         persisted.append(
             _persist_candidate(
@@ -200,7 +211,7 @@ def _score(
     tc: TorrentCandidate,
     size_match: bool,
     mediainfo_match: bool | None,
-    all_candidates: list[TorrentCandidate],
+    effective_sizes: list[int | None],
 ) -> tuple[float, str | None]:
     if not size_match:
         return CONFIDENCE_NO_MATCH, None
@@ -210,7 +221,7 @@ def _score(
         # non un candidato debole da mandare comunque in review.
         return CONFIDENCE_NO_MATCH, "mediainfo_mismatch"
 
-    same_size_count = sum(1 for c in all_candidates if c.size_bytes == media_item.size_bytes)
+    same_size_count = sum(1 for s in effective_sizes if s is not None and s == media_item.size_bytes)
     unambiguous_size = same_size_count == 1
 
     ambiguity_reason = None
@@ -226,6 +237,30 @@ def _score(
         ambiguity_reason = "multiple_size_matches"
 
     return CONFIDENCE_SIZE_ONLY, ambiguity_reason
+
+
+def _effective_candidate_size(tc: TorrentCandidate, media_item: MediaItem) -> int | None:
+    """Dimensione da confrontare con media_item.size_bytes. Per un file
+    singolo è tc.size_bytes (l'intero torrent = l'unico file). Per un
+    season pack è la dimensione del SOLO file dell'episodio cercato — MAI
+    tc.size_bytes, che è la somma di tutti gli episodi del pack e quindi
+    non potrebbe mai combaciare con un singolo file locale (bug: prima di
+    questo fix, un season pack aveva sempre confidence 0 per questo
+    motivo, sparendo dai candidati anche quando l'episodio cercato era
+    davvero dentro il pack). Ritorna None se non è possibile isolare il
+    file giusto (episodio locale ignoto, tracker senza dimensioni per
+    file, o filename del pack non parsabile) — mai un confronto "a caso"."""
+    video_files = [f for f in (tc.file_list or []) if _is_video(f)]
+    if len(video_files) <= 1:
+        return tc.size_bytes
+    if media_item.episode_number is None or not tc.file_sizes:
+        return None
+    try:
+        pack_map = map_pack_files_by_episode(video_files)
+    except ValueError:
+        return None
+    filename = pack_map.get(media_item.episode_number)
+    return tc.file_sizes.get(filename) if filename is not None else None
 
 
 def _is_video(filename: str) -> bool:

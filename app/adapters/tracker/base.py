@@ -33,6 +33,10 @@ class TorrentCandidate:
     mediainfo_unique_id: str | None
     folder: str | None = None  # sottocartella del pack (UNIT3D "folder"), None per file singolo
     download_link: str | None = None  # URL autenticato al .torrent, necessario per aggiungerlo al client
+    file_sizes: dict[str, int] | None = None  # nome file -> dimensione in byte, se il tracker lo espone
+    # (es. UNIT3D files[].size) — indispensabile per valutare un season pack:
+    # size_bytes è la dimensione dell'INTERO torrent, mai confrontabile con
+    # un singolo episodio locale (vedi app/matching.py::_effective_candidate_size).
 
 
 @dataclass
@@ -169,15 +173,17 @@ class Unit3dTrackerAdapter(TrackerAdapter):
 
     def _to_candidate(self, item: dict) -> TorrentCandidate:
         attrs = item["attributes"]
+        files = attrs.get("files") or []
         return TorrentCandidate(
             torrent_id_remote=str(item["id"]),
             info_hash=None,
             name=attrs["name"],
             size_bytes=attrs["size"],
-            file_list=[f["name"] for f in attrs.get("files") or []],
+            file_list=[f["name"] for f in files],
             mediainfo_unique_id=self._extract_unique_id(attrs.get("media_info")),
             folder=attrs.get("folder"),
             download_link=attrs.get("download_link"),
+            file_sizes={f["name"]: f["size"] for f in files if "size" in f},
         )
 
     @classmethod

@@ -21,13 +21,13 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from guessit import guessit
 from sqlalchemy.orm import Session
 
 from app.adapters.torrent_client.base import TorrentClientAdapter
 from app.fs_scope import ScopeViolation, resolve_scoped
 from app.models import Candidate, Disk, MediaItem, SeedJob
 from app.scanner import VIDEO_EXTENSIONS
+from app.season_pack import map_pack_files_by_episode
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +153,10 @@ def _execute_season_pack(
             f"Candidate {candidate.id} ha più file video ma nessuna cartella pack (folder) indicata dal tracker"
         )
 
-    pack_files_by_episode: dict[int, str] = {}
-    for filename in video_files:
-        episode = _first(guessit(filename).get("episode"))
-        if episode is None:
-            raise ExecutionError(f"Impossibile determinare l'episodio dal nome file del pack: {filename!r}")
-        pack_files_by_episode[episode] = filename
+    try:
+        pack_files_by_episode = map_pack_files_by_episode(video_files)
+    except ValueError as exc:
+        raise ExecutionError(str(exc)) from exc
 
     local_items = (
         session.query(MediaItem)
@@ -396,9 +394,3 @@ def _check_same_filesystem(source_path: str, torrents_root: str) -> None:
 
 def _is_video(filename: str) -> bool:
     return any(filename.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
-
-
-def _first(value):
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value
