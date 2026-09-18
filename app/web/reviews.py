@@ -74,9 +74,20 @@ def _file_row(
     # per-libreria se configurata, vedi MediaPath.effective_new_torrent_rel_path)
     # — non va confuso con disk.torrents_rel_path, che è invece dove si
     # cerca "già in seeding" (sempre l'intera cartella torrent del disco).
+    # folder_pending: il tracker non ha riportato una cartella — verrà
+    # letta dal .torrent reale solo al momento dell'approvazione (vedi
+    # app/executor.py::_ensure_folder_known), mai indovinata qui: un
+    # target_path senza cartella in questo caso non è ancora quello
+    # definitivo, va segnalato come tale invece di mostrare un path piatto
+    # che potrebbe risultare sbagliato dopo l'approvazione.
+    # Limitato ai pack (>1 file video): per un file singolo l'assenza di
+    # cartella è quasi sempre corretta così com'è (nessun bisogno di
+    # segnalare un'incertezza che nella grande maggioranza dei casi non
+    # si materializza mai).
     new_torrent_rel_path = media_item.media_path.effective_new_torrent_rel_path
+    folder_pending = candidate.folder is None and bool(candidate.download_link) and len(video_files) > 1
     target_path = None
-    if new_torrent_rel_path and filename:
+    if new_torrent_rel_path and filename and not folder_pending:
         relative = os.path.join(candidate.folder, filename) if candidate.folder else filename
         target_path = f"/{new_torrent_rel_path}/{relative}"
 
@@ -94,6 +105,7 @@ def _file_row(
         "file_path": media_item.file_path,
         "size_bytes": media_item.size_bytes,
         "target_path": target_path,
+        "folder_pending": folder_pending,
         "torrents_configured": bool(disk.torrents_rel_path),
         "existing_links": existing_links,
     }

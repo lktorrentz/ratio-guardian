@@ -190,7 +190,7 @@ class Unit3dTrackerAdapter(TrackerAdapter):
     def _to_candidate(self, item: dict) -> TorrentCandidate:
         attrs = item["attributes"]
         files = attrs.get("files") or []
-        folder, file_list, file_sizes = self._normalize_pack_structure(attrs.get("folder"), files, attrs["name"])
+        folder, file_list, file_sizes = self._normalize_pack_structure(attrs.get("folder"), files)
         return TorrentCandidate(
             torrent_id_remote=str(item["id"]),
             info_hash=None,
@@ -206,26 +206,30 @@ class Unit3dTrackerAdapter(TrackerAdapter):
 
     @staticmethod
     def _normalize_pack_structure(
-        raw_folder: str | None, files: list[dict], torrent_name: str
+        raw_folder: str | None, files: list[dict]
     ) -> tuple[str | None, list[str], dict[str, int]]:
-        """Determina la cartella del pack e normalizza file_list/file_sizes
-        a nomi nudi — il resto del motore (matching, esecutore) assume
-        SEMPRE folder e nome file separati, mai un path già annidato
-        dentro file_list.
+        """Determina la cartella del pack (se ricavabile qui) e normalizza
+        file_list/file_sizes a nomi nudi — il resto del motore (matching,
+        esecutore) assume SEMPRE folder e nome file separati, mai un path
+        già annidato dentro file_list.
 
         Alcune istanze UNIT3D riportano il path relativo già dentro
         files[].name (es. "Release.Name/Show.S01E02.mkv") invece che nella
         sola attributes.folder: se tutti i file condividono lo stesso
         primo componente di path, quella è la cartella vera — va tolta dal
         nome e MAI anche aggiunta separatamente (altrimenti si otterrebbe
-        un path raddoppiato all'esecuzione). Se invece i nomi sono già
-        nudi e attributes.folder non è popolato ma ci sono più file, un
-        torrent multi-file BitTorrent ha comunque quasi sempre una
-        cartella radice che di norma coincide con il nome della release —
-        mai applicato per un file singolo, dove una cartella non è
-        scontata (osservato: era il motivo per cui alcuni season pack
-        finivano senza cartella nel path di destinazione, con l'API che
-        non popolava affatto "folder" per quel torrent)."""
+        un path raddoppiato all'esecuzione).
+
+        Se invece manca sia attributes.folder sia un path annidato,
+        NON si indovina più una cartella da attributes.name: è un titolo
+        "leggibile" per la UI (spazi), non necessariamente il vero nome di
+        release scritto nel .torrent (punti) — usarlo produceva un path
+        che il client non riconosceva, causando un mismatch e quindi un
+        recheck fallito (osservato in produzione: risalita al 99% e poi
+        fallimento). In questo caso folder resta None qui; l'unica fonte
+        davvero affidabile è il .torrent stesso, letto da
+        app/executor.py al momento dell'esecuzione (vedi
+        app/torrent_file.py) — mai un fallimento silente."""
         names = [f["name"] for f in files]
 
         embedded_folder = None
@@ -244,9 +248,8 @@ class Unit3dTrackerAdapter(TrackerAdapter):
             }
             return embedded_folder, stripped_names, file_sizes
 
-        folder = raw_folder or (torrent_name if len(names) > 1 else None)
         file_sizes = {f["name"]: f["size"] for f in files if "size" in f}
-        return folder, names, file_sizes
+        return raw_folder, names, file_sizes
 
     @classmethod
     def _extract_unique_id(cls, media_info: str | None) -> str | None:

@@ -89,6 +89,8 @@
                     <span class="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide whitespace-nowrap">Nuovo link</span>
                     <span class="font-mono break-all text-gray-500">{{ f.target_path }}</span>
                 </div>
+                {% elif f.folder_pending %}
+                <div class="mt-1 text-gray-400">cartella del pack non ancora nota — verrà letta dal .torrent al momento dell'approvazione</div>
                 {% else %}
                 <div class="mt-1 text-red-700">cartella torrent non configurata sul disco — impossibile creare l'hardlink</div>
                 {% endif %}

@@ -23,13 +23,18 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+import httpx
+
 from app.adapters.torrent_client.base import TorrentClientAdapter
 from app.fs_scope import ScopeViolation, resolve_scoped
 from app.models import Candidate, Disk, MediaItem, SeedJob
 from app.scanner import VIDEO_EXTENSIONS
 from app.season_pack import map_pack_files_by_episode
+from app.torrent_file import TorrentMetainfoError, fetch_root_folder
 
 logger = logging.getLogger(__name__)
+
+_torrent_http_client = httpx.Client(timeout=15.0)
 
 
 class ExecutionError(Exception):
@@ -77,6 +82,15 @@ def execute_candidate(
     if not video_files:
         raise ExecutionError(f"Candidate {candidate.id} non ha file video nel file_list")
 
+    # Limitato ai pack (>1 file video): un file singolo con folder=None è
+    # quasi sempre correttamente piatto (nessuna cartella), sottoporlo
+    # comunque a un fetch di rete (fino a 15s di timeout se il tracker non
+    # risponde) rallenterebbe inutilmente ogni singola approvazione. Per un
+    # pack invece una cartella è pressoché certa, e sbagliarla causa un
+    # recheck fallito — vale la spesa di un fetch mirato.
+    if len(video_files) > 1:
+        _ensure_folder_known(session, candidate)
+
     # Un solo file video non è per forza un torrent "piatto": molte release
     # (specie film) impacchettano comunque il file dentro una cartella con
     # lo stesso nome della release (candidate.folder valorizzato pur con un
@@ -93,6 +107,34 @@ def execute_candidate(
     return _execute_single_file(
         session, candidate, media_item, disk, scan_root, target_root, video_files[0], torrent_client_adapter
     )
+
+
+def _ensure_folder_known(session: Session, candidate: Candidate) -> None:
+    """Se il tracker non ha riportato una cartella (né direttamente né
+    annidata nei nomi file — vedi Unit3dTrackerAdapter._normalize_pack_structure),
+    l'unica fonte davvero affidabile è il .torrent stesso: legge
+    info.name dal bencode (BEP3), mai attributes.name del tracker (un
+    titolo "leggibile" con spazi, spesso diverso dal vero nome di
+    release con i punti — usarlo produceva un path che il client non
+    riconosceva, causando un mismatch e quindi un recheck fallito).
+    Backfilla candidate.folder una volta sola (persistito, mai
+    ri-scaricato ai retry successivi). Mai fatale: un fallimento qui
+    lascia folder invariato, e le validazioni esplicite già esistenti
+    (es. _execute_season_pack) segnalano poi l'assenza di una cartella,
+    mai un nome indovinato."""
+    if candidate.folder or not candidate.download_link:
+        return
+    try:
+        folder = fetch_root_folder(_torrent_http_client, candidate.download_link)
+    except TorrentMetainfoError:
+        logger.warning(
+            "Impossibile determinare la cartella dal .torrent per candidate %s", candidate.id, exc_info=True
+        )
+        return
+    if folder:
+        candidate.folder = folder
+        session.commit()
+        logger.info("Cartella determinata dal .torrent per candidate %s: %r", candidate.id, folder)
 
 
 def _execute_single_file(
