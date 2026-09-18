@@ -27,20 +27,22 @@ def _review_view(review: MatchReview) -> dict:
     non era chiaro se/dove sarebbe stato creato un nuovo hardlink."""
     candidate = review.candidate
     media_item = candidate.media_item
-    disk = media_item.media_path.disk
+    media_path = media_item.media_path
+    disk = media_path.disk
+    torrents_rel_path = media_path.effective_torrents_rel_path
     file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
 
     target_path = None
-    if disk.torrents_rel_path:
+    if torrents_rel_path:
         if candidate.folder:
-            target_path = f"/{disk.torrents_rel_path}/{candidate.folder}/  ({len(file_list)} file)"
+            target_path = f"/{torrents_rel_path}/{candidate.folder}/  ({len(file_list)} file)"
         elif file_list:
-            target_path = f"/{disk.torrents_rel_path}/{file_list[0]}"
+            target_path = f"/{torrents_rel_path}/{file_list[0]}"
 
     return {
         "review": review,
         "target_path": target_path,
-        "torrents_configured": bool(disk.torrents_rel_path),
+        "torrents_configured": bool(torrents_rel_path),
         "nlink": media_item.nlink,
         "already_linked_elsewhere": (media_item.nlink or 0) > 1,
     }

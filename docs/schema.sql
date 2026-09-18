@@ -17,11 +17,18 @@ CREATE TABLE IF NOT EXISTS disk (
 );
 
 CREATE TABLE IF NOT EXISTS media_path (
-    id              INTEGER PRIMARY KEY,
-    disk_id         INTEGER NOT NULL REFERENCES disk(id) ON DELETE CASCADE,
-    relative_path   TEXT NOT NULL,          -- relativo a disk.root_path
-    content_type    TEXT NOT NULL CHECK (content_type IN ('movie','tv')),
-    enabled         BOOLEAN NOT NULL DEFAULT 1,
+    id                  INTEGER PRIMARY KEY,
+    disk_id             INTEGER NOT NULL REFERENCES disk(id) ON DELETE CASCADE,
+    relative_path       TEXT NOT NULL,          -- relativo a disk.root_path
+    content_type        TEXT NOT NULL CHECK (content_type IN ('movie','tv')),
+    enabled             BOOLEAN NOT NULL DEFAULT 1,
+    torrents_rel_path   TEXT,                   -- opzionale, relativo a disk.root_path (stessa
+                                                 -- convenzione di disk.torrents_rel_path): cartella
+                                                 -- torrent SPECIFICA per questa libreria, per i client
+                                                 -- che separano i completed per categoria (es.
+                                                 -- .../completed/movies). Deve essere disk.torrents_rel_path
+                                                 -- stesso o una sua sottocartella (validato in app) — se
+                                                 -- nullo si usa disk.torrents_rel_path invariato.
     UNIQUE(disk_id, relative_path)
 );
 

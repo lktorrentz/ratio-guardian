@@ -81,6 +81,42 @@ def create_media_path_row(session: Session, disk: Disk, relative_path: str, cont
     return media_path
 
 
+def set_media_path_torrents_path(
+    session: Session, media_path: MediaPath, torrents_rel_path: str | None
+) -> MediaPath:
+    """torrents_rel_path è relativo a disk.root_path, stessa convenzione di
+    disk.torrents_rel_path — per i client che separano i completed per
+    categoria (es. .../completed/movies). Deve essere quella stessa
+    cartella o una sua sottocartella: mai un modo per spostare i seed di
+    una libreria altrove sul disco (vedi CLAUDE.md, validazione "stesso
+    disco")."""
+    disk = media_path.disk
+    if not torrents_rel_path:
+        media_path.torrents_rel_path = None
+        session.commit()
+        return media_path
+
+    if not disk.torrents_rel_path:
+        raise MediaPathValidationError(f"Configura prima la cartella torrent del disco '{disk.label}'")
+
+    try:
+        resolved = resolve_scoped(disk.root_path, torrents_rel_path)
+        disk_torrents_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
+    except ScopeViolation as exc:
+        raise MediaPathValidationError(str(exc)) from exc
+
+    if resolved != disk_torrents_root and not resolved.startswith(disk_torrents_root + os.sep):
+        raise MediaPathValidationError(
+            f"Deve essere la cartella torrent del disco (/{disk.torrents_rel_path}) o una sua sottocartella"
+        )
+    if not os.path.isdir(resolved):
+        raise MediaPathValidationError(f"Percorso non trovato: {torrents_rel_path!r}")
+
+    media_path.torrents_rel_path = torrents_rel_path
+    session.commit()
+    return media_path
+
+
 @router.get("/api/disks/{disk_id}/media-paths", response_model=list[MediaPathResponse])
 def list_media_paths(disk_id: int, session: Session = Depends(get_session)):
     _get_disk_or_404(session, disk_id)

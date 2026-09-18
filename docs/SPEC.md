@@ -37,6 +37,7 @@ Un utente senza RAID/FUSE ha dischi fisici distinti, ciascuno potenzialmente con
 - `relative_path`, relativo a `disk.root_path`
 - `content_type`: `movie` | `tv` (enum aperta a valori futuri, ma il motore di matching gestisce nativamente solo questi due). Necessario perché la logica di risoluzione cambia: file singolo (movie) vs cartella-stagione con più episodi (tv).
 - Un disco può avere zero, una o più `MediaPath` di ciascun tipo (caso "cartella contenitore unica" → una sola `MediaPath` di tipo `tv` che punta a `/disk/media/tv`; caso "strutture sparse" → più `MediaPath`, anche con lo stesso `content_type`, su path diversi dello stesso disco).
+- `torrents_rel_path`: opzionale, relativo a `disk.root_path` (stessa convenzione di `disk.torrents_rel_path`). Per i client che separano i completed per categoria (es. `.../completed/movies`, `.../completed/tv`): quando impostato, l'esecutore (`app/executor.py::execute_candidate`) crea l'hardlink lì invece che nella cartella torrent generale del disco, e il controllo "già in seeding" cerca solo lì. Deve essere `disk.torrents_rel_path` stesso o una sua sottocartella (validato in `app/api/media_paths.py::set_media_path_torrents_path`) — mai un modo per spostare i seed di una libreria fuori dalla cartella torrent del disco. Se assente, si usa `disk.torrents_rel_path` invariato (`MediaPath.effective_torrents_rel_path`).
 
 ### Path relativi, non assoluti
 

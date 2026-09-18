@@ -45,13 +45,15 @@ def execute_candidate(
     (nulla da fare). Solleva ExecutionError per ogni precondizione mancante
     (mai un fallimento silente, mai un tentativo "best effort" ambiguo)."""
     media_item = candidate.media_item
-    disk = media_item.media_path.disk
+    media_path = media_item.media_path
+    disk = media_path.disk
 
-    if not disk.torrents_rel_path:
+    torrents_rel_path = media_path.effective_torrents_rel_path
+    if not torrents_rel_path:
         raise ExecutionError(f"Disco '{disk.label}' non ha torrents_rel_path configurato")
 
     try:
-        torrents_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
+        torrents_root = resolve_scoped(disk.root_path, torrents_rel_path)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
@@ -101,7 +103,7 @@ def _execute_single_file(
     # torrent.
     relative_target = os.path.join(candidate.folder, expected_filename) if candidate.folder else expected_filename
     try:
-        target_path = resolve_scoped(disk.root_path, os.path.join(disk.torrents_rel_path, relative_target))
+        target_path = resolve_scoped(torrents_root, relative_target)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
@@ -170,7 +172,7 @@ def _execute_season_pack(
             raise ExecutionError(f"File locale non trovato per episodio {episode}: {item.file_path}")
 
     try:
-        pack_dir = resolve_scoped(disk.root_path, os.path.join(disk.torrents_rel_path, candidate.folder))
+        pack_dir = resolve_scoped(torrents_root, candidate.folder)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
@@ -294,9 +296,13 @@ def retry_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAd
         session.commit()
         raise ExecutionError(seed_job.error_message)
 
-    disk = candidate.media_item.media_path.disk
+    media_path = candidate.media_item.media_path
+    disk = media_path.disk
+    torrents_rel_path = media_path.effective_torrents_rel_path
+    if not torrents_rel_path:
+        raise ExecutionError(f"Disco '{disk.label}' non ha torrents_rel_path configurato")
     try:
-        torrents_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
+        torrents_root = resolve_scoped(disk.root_path, torrents_rel_path)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 

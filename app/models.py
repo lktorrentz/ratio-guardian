@@ -68,11 +68,19 @@ class MediaPath(Base):
     relative_path: Mapped[str] = mapped_column(nullable=False)
     content_type: Mapped[str] = mapped_column(nullable=False)
     enabled: Mapped[bool] = mapped_column(nullable=False, server_default=text("1"))
+    torrents_rel_path: Mapped[str | None]
 
     disk: Mapped["Disk"] = relationship(back_populates="media_paths")
     media_items: Mapped[list["MediaItem"]] = relationship(
         back_populates="media_path", cascade="all, delete-orphan"
     )
+
+    @property
+    def effective_torrents_rel_path(self) -> str | None:
+        """torrents_rel_path di questa libreria se configurato, altrimenti
+        quello del disco — vedi app/executor.py, unico punto che decide
+        dove va creato l'hardlink e da dove si controlla "già in seeding"."""
+        return self.torrents_rel_path or self.disk.torrents_rel_path
 
 
 class Tracker(Base):
