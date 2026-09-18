@@ -1,9 +1,11 @@
-"""Pagina web 'Libreria': storico di tutto ciò che è già stato deciso
-(seeding, fallito, o rifiutato) — mai i pending, quelli restano solo in
-/reviews (vedi app/library.py e CLAUDE.md: niente duplicazione tra le
-due pagine)."""
+"""Pagina web 'Libreria': vista completa di tutti i file scansionati, non
+solo quelli passati per una decisione — chi è già collegato/seeding
+correttamente, e chi è orfano con lo stato del tentativo più recente
+(in attesa di revisione, in corso, fallito, rifiutato, o senza alcun
+candidato trovato). Vedi app/library.py per la logica di stato/gruppo."""
 
 import json
+from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
@@ -13,8 +15,8 @@ from sqlalchemy.orm import Session
 from app import review as review_service
 from app.deps import get_session
 from app.executor import ExecutionError
-from app.library import group_seed_job, group_status, list_library_groups
-from app.models import MatchReview, SeedJob, TorrentClient
+from app.library import Entry, list_library_groups
+from app.models import SeedJob, TorrentClient
 from app.scanner import VIDEO_EXTENSIONS
 from app.web.templates import templates
 
@@ -22,24 +24,29 @@ router = APIRouter()
 
 STATUS_LABELS = {
     "seeding": "Seeding",
-    "failed": "Fallito",
+    "pending": "In attesa di revisione",
     "in_progress": "In verifica",
+    "failed": "Fallito",
     "rejected": "Rifiutato",
+    "unmatched": "Nessun match trovato",
     "unknown": "Approvato (non eseguito)",
 }
 
-STATUS_FILTERS = ("all", "seeding", "failed", "in_progress", "rejected", "unknown")
+STATUS_FILTERS = ("all", "orphan", "seeding", "pending", "in_progress", "failed", "rejected", "unmatched", "unknown")
+FILTER_LABELS = {"all": "Tutti", "orphan": "Orfani"}
 
 
 def _is_video(filename: str) -> bool:
     return any(filename.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)
 
 
-def _tracker_url(candidate) -> str:
+def _tracker_url(candidate) -> str | None:
     """Pattern standard delle istanze UNIT3D — verificato in docs/SPEC.md
     sezione 7 per i dettagli API, non per questo specifico URL di
     visualizzazione (a differenza degli endpoint API, non testato contro
     un'istanza reale: se il tuo tracker usa un path diverso, va adattato)."""
+    if candidate is None:
+        return None
     return f"{candidate.tracker.base_url.rstrip('/')}/torrents/{candidate.torrent_id_remote}"
 
 
@@ -61,27 +68,51 @@ def _tmdb_url(media_item) -> str | None:
     return f"https://www.themoviedb.org/{kind}/{media_item.tmdb_id}"
 
 
-def _group_view(group: list[MatchReview], torrent_client: TorrentClient | None) -> dict:
-    primary = group[0]
-    candidate = primary.candidate
-    media_item = candidate.media_item
-    disk = media_item.media_path.disk
-    seed_job = group_seed_job(group)
+def _naive(dt: datetime | None) -> datetime | None:
+    """created_at (SQLite CURRENT_TIMESTAMP) è naive, decided_at/
+    last_scanned_at sono aware (datetime.now(timezone.utc)) — normalizzati
+    per poterli confrontare tra loro nell'ordinamento senza un
+    TypeError."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
 
-    file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
-    video_files = [f for f in file_list if _is_video(f)]
-    is_pack = len(video_files) > 1
+
+def _group_seed_job(group: list[Entry]):
+    for _, _, review in group:
+        if review is not None and review.candidate.seed_jobs:
+            return review.candidate.seed_jobs[0]
+    return None
+
+
+def _group_view(group: list[Entry], torrent_client: TorrentClient | None) -> dict:
+    primary_item, status, primary_review = group[0]
+    candidate = primary_review.candidate if primary_review is not None else None
+    disk = primary_item.media_path.disk
+
+    is_pack = False
+    if candidate is not None:
+        file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
+        video_files = [f for f in file_list if _is_video(f)]
+        is_pack = len(video_files) > 1
 
     if is_pack:
-        media_path_display = f"{media_item.media_path.relative_path} · {len(group)} episodi"
+        media_path_display = f"{primary_item.media_path.relative_path} · {len(group)} episodi"
     else:
-        media_path_display = media_item.file_path
+        media_path_display = primary_item.file_path
 
-    status = group_status(group)
-    decided_at = max((r.decided_at for r in group if r.decided_at is not None), default=None)
+    seed_job = _group_seed_job(group)
+    decided_at = max(
+        (r.decided_at for _, _, r in group if r is not None and r.decided_at is not None), default=None
+    )
+    sort_key = (
+        _naive(decided_at)
+        or _naive(candidate.created_at if candidate is not None else None)
+        or _naive(primary_item.last_scanned_at)
+        or datetime.min
+    )
 
     return {
-        "candidate": candidate,
         "disk": disk,
         "is_pack": is_pack,
         "episode_count": len(group),
@@ -90,10 +121,11 @@ def _group_view(group: list[MatchReview], torrent_client: TorrentClient | None) 
         "status": status,
         "status_label": STATUS_LABELS[status],
         "seed_job": seed_job,
-        "decided_at": decided_at,
+        "sort_key": sort_key,
+        "tracker_label": candidate.tracker.label if candidate is not None else None,
         "tracker_url": _tracker_url(candidate),
         "client_url": _client_url(torrent_client, seed_job.info_hash if seed_job else None),
-        "tmdb_url": _tmdb_url(media_item),
+        "tmdb_url": _tmdb_url(primary_item),
     }
 
 
@@ -104,7 +136,7 @@ def library_page(request: Request, status: str = "all", session: Session = Depen
     groups = list_library_groups(session, status=status)
     torrent_client = session.query(TorrentClient).filter_by(enabled=True).first()
     views = [_group_view(g, torrent_client) for g in groups]
-    views.sort(key=lambda v: v["decided_at"] or v["candidate"].created_at, reverse=True)
+    views.sort(key=lambda v: v["sort_key"], reverse=True)
     return templates.TemplateResponse(
         request,
         "library.html",
@@ -112,6 +144,7 @@ def library_page(request: Request, status: str = "all", session: Session = Depen
             "views": views,
             "status": status,
             "status_labels": STATUS_LABELS,
+            "filter_labels": FILTER_LABELS,
             "status_filters": STATUS_FILTERS,
         },
     )

@@ -3,15 +3,16 @@
 {% block content %}
 <h1 class="text-xl font-semibold mb-1">Libreria</h1>
 <p class="text-gray-500 mb-4">
-    Storico di tutto ciò che è già stato deciso — seeding, fallito o rifiutato. I match ancora da decidere restano
-    nella <a href="/reviews" class="underline">coda di revisione</a>.
+    Tutti i file scansionati: chi è già collegato/seeding correttamente e chi è orfano, con lo stato del tentativo
+    più recente. Le decisioni ancora da prendere restano nella <a href="/reviews" class="underline">coda di
+    revisione</a>.
 </p>
 
 <div class="flex flex-wrap gap-2 mb-6">
     {% for f in status_filters %}
     <a href="/library?status={{ f }}"
        class="text-xs px-3 py-1.5 rounded border {% if status == f %}bg-slate-900 text-white border-slate-900{% else %}bg-white text-gray-600 border-gray-200 hover:border-gray-400{% endif %}">
-        {{ "Tutti" if f == "all" else status_labels[f] }}
+        {{ filter_labels[f] if f in filter_labels else status_labels[f] }}
     </a>
     {% endfor %}
 </div>
@@ -44,15 +45,19 @@
                     <span class="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
                     {% elif v.status == "failed" %}
                     <span class="bg-red-50 text-red-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
-                    {% elif v.status == "in_progress" %}
+                    {% elif v.status in ("in_progress", "pending") %}
                     <span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">{{ v.status_label }}</span>
                     {% else %}
                     <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{{ v.status_label }}</span>
                     {% endif %}
                 </td>
                 <td class="px-4 py-2 whitespace-nowrap">
+                    {% if v.tracker_url %}
                     <a href="{{ v.tracker_url }}" target="_blank" rel="noopener"
-                       class="bg-slate-50 text-slate-700 px-2 py-0.5 rounded hover:underline">{{ v.candidate.tracker.label }} ↗</a>
+                       class="bg-slate-50 text-slate-700 px-2 py-0.5 rounded hover:underline">{{ v.tracker_label }} ↗</a>
+                    {% else %}
+                    <span class="text-gray-400">—</span>
+                    {% endif %}
                 </td>
                 <td class="px-4 py-2 whitespace-nowrap">
                     {% if v.client_url %}
@@ -71,10 +76,12 @@
                     {% endif %}
                 </td>
                 <td class="px-4 py-2 whitespace-nowrap">
-                    {% if v.status == "failed" %}
+                    {% if v.status == "failed" and v.seed_job %}
                     <form method="post" action="/library/failed/{{ v.seed_job.id }}/retry">
                         <button type="submit" class="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">Riprova</button>
                     </form>
+                    {% elif v.status == "pending" %}
+                    <a href="/reviews" class="text-blue-600 hover:underline">Vai a Revisione</a>
                     {% endif %}
                 </td>
             </tr>
@@ -83,6 +90,6 @@
     </table>
 </div>
 {% else %}
-<p class="text-gray-400 italic">Nessun match trovato per questo filtro.</p>
+<p class="text-gray-400 italic">Nessun file trovato per questo filtro.</p>
 {% endif %}
 {% endblock %}
