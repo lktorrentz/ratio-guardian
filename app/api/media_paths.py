@@ -81,18 +81,22 @@ def create_media_path_row(session: Session, disk: Disk, relative_path: str, cont
     return media_path
 
 
-def set_media_path_torrents_path(
-    session: Session, media_path: MediaPath, torrents_rel_path: str | None
+def set_media_path_new_torrent_path(
+    session: Session, media_path: MediaPath, new_torrent_rel_path: str | None
 ) -> MediaPath:
-    """torrents_rel_path è relativo a disk.root_path, stessa convenzione di
-    disk.torrents_rel_path — per i client che separano i completed per
-    categoria (es. .../completed/movies). Deve essere quella stessa
-    cartella o una sua sottocartella: mai un modo per spostare i seed di
-    una libreria altrove sul disco (vedi CLAUDE.md, validazione "stesso
-    disco")."""
+    """new_torrent_rel_path è relativo a disk.root_path, stessa convenzione
+    di disk.torrents_rel_path — ma riguarda SOLO dove creare un NUOVO
+    hardlink per questa libreria (e quale save_path comunicare al client),
+    per i client che separano i completed per categoria (es.
+    .../completed/movies). NON restringe la ricerca "già in seeding", che
+    resta sempre su tutta disk.torrents_rel_path (un client può avere più
+    sottocartelle che vanno comunque scansionate tutte per non generare
+    doppioni). Deve essere quella stessa cartella o una sua sottocartella:
+    mai un modo per spostare i seed di una libreria altrove sul disco
+    (vedi CLAUDE.md, validazione "stesso disco")."""
     disk = media_path.disk
-    if not torrents_rel_path:
-        media_path.torrents_rel_path = None
+    if not new_torrent_rel_path:
+        media_path.new_torrent_rel_path = None
         session.commit()
         return media_path
 
@@ -100,7 +104,7 @@ def set_media_path_torrents_path(
         raise MediaPathValidationError(f"Configura prima la cartella torrent del disco '{disk.label}'")
 
     try:
-        resolved = resolve_scoped(disk.root_path, torrents_rel_path)
+        resolved = resolve_scoped(disk.root_path, new_torrent_rel_path)
         disk_torrents_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
     except ScopeViolation as exc:
         raise MediaPathValidationError(str(exc)) from exc
@@ -110,9 +114,9 @@ def set_media_path_torrents_path(
             f"Deve essere la cartella torrent del disco (/{disk.torrents_rel_path}) o una sua sottocartella"
         )
     if not os.path.isdir(resolved):
-        raise MediaPathValidationError(f"Percorso non trovato: {torrents_rel_path!r}")
+        raise MediaPathValidationError(f"Percorso non trovato: {new_torrent_rel_path!r}")
 
-    media_path.torrents_rel_path = torrents_rel_path
+    media_path.new_torrent_rel_path = new_torrent_rel_path
     session.commit()
     return media_path
 

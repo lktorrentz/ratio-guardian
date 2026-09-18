@@ -68,7 +68,7 @@ class MediaPath(Base):
     relative_path: Mapped[str] = mapped_column(nullable=False)
     content_type: Mapped[str] = mapped_column(nullable=False)
     enabled: Mapped[bool] = mapped_column(nullable=False, server_default=text("1"))
-    torrents_rel_path: Mapped[str | None]
+    new_torrent_rel_path: Mapped[str | None]
 
     disk: Mapped["Disk"] = relationship(back_populates="media_paths")
     media_items: Mapped[list["MediaItem"]] = relationship(
@@ -76,11 +76,15 @@ class MediaPath(Base):
     )
 
     @property
-    def effective_torrents_rel_path(self) -> str | None:
-        """torrents_rel_path di questa libreria se configurato, altrimenti
-        quello del disco — vedi app/executor.py, unico punto che decide
-        dove va creato l'hardlink e da dove si controlla "già in seeding"."""
-        return self.torrents_rel_path or self.disk.torrents_rel_path
+    def effective_new_torrent_rel_path(self) -> str | None:
+        """Cartella dove va creato un NUOVO hardlink per questa libreria (e
+        il save_path da comunicare al client) se configurata, altrimenti
+        quella del disco — vedi app/executor.py. Riguarda SOLO dove
+        posizionare cose nuove: la ricerca "già in seeding" resta sempre
+        sull'intera disk.torrents_rel_path (mai ristretta a questa
+        sottocartella), perché un client può organizzare i completed in
+        più sottocartelle che vanno comunque scansionate tutte."""
+        return self.new_torrent_rel_path or self.disk.torrents_rel_path
 
 
 class Tracker(Base):

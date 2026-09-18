@@ -76,25 +76,28 @@
                 <td colspan="4" class="px-4 py-2 bg-gray-50">
                     <details>
                         <summary class="text-xs text-gray-600 cursor-pointer select-none">
-                            Cartella torrent per questa libreria:
-                            <span class="font-mono">{{ ("/" + mp.torrents_rel_path) if mp.torrents_rel_path else ("(quella del disco" + ((": /" + disk.torrents_rel_path) if disk.torrents_rel_path else " — non configurata") + ")") }}</span>
+                            Cartella per i NUOVI torrent di questa libreria:
+                            <span class="font-mono">{{ ("/" + mp.new_torrent_rel_path) if mp.new_torrent_rel_path else ("(quella del disco" + ((": /" + disk.torrents_rel_path) if disk.torrents_rel_path else " — non configurata") + ")") }}</span>
                             — modifica
                         </summary>
                         <div class="mt-2 max-w-md">
                             <p class="text-xs text-gray-500 mb-2">
                                 Da impostare solo se il client organizza i completed per categoria (es.
-                                <code>.../completed/movies</code>) e vuoi che l'hardlink e il controllo "già in seeding"
-                                per QUESTA libreria usino quella sottocartella invece della cartella torrent generale
-                                del disco. Deve essere quella stessa cartella o una sua sottocartella.
+                                <code>.../completed/movies</code>) e vuoi che il NUOVO hardlink per questa libreria
+                                venga creato lì (e quello sia il save_path comunicato al client), invece che nella
+                                cartella torrent generale del disco. Deve essere quella stessa cartella o una sua
+                                sottocartella.
+                                <strong>Non riguarda il controllo "già in seeding"</strong>, che continua a
+                                scansionare sempre l'intera cartella torrent del disco, sottocartelle comprese.
                             </p>
-                            <form method="post" action="/config/media-paths/{{ mp.id }}/torrents-path">
-                                <div class="tree-browser border rounded p-3 mb-2" data-disk-id="{{ disk.id }}" data-target="mp_torrents_rel_path_{{ mp.id }}" data-initial-path="{{ mp.torrents_rel_path or disk.torrents_rel_path or '' }}"></div>
-                                <input type="hidden" id="mp_torrents_rel_path_{{ mp.id }}" name="torrents_rel_path" value="{{ mp.torrents_rel_path or '' }}">
+                            <form method="post" action="/config/media-paths/{{ mp.id }}/new-torrent-path">
+                                <div class="tree-browser border rounded p-3 mb-2" data-disk-id="{{ disk.id }}" data-target="mp_new_torrent_rel_path_{{ mp.id }}" data-initial-path="{{ mp.new_torrent_rel_path or disk.torrents_rel_path or '' }}"></div>
+                                <input type="hidden" id="mp_new_torrent_rel_path_{{ mp.id }}" name="new_torrent_rel_path" value="{{ mp.new_torrent_rel_path or '' }}">
                                 <button type="submit" class="bg-blue-600 text-white text-xs px-3 py-1.5 rounded hover:bg-blue-700">Salva</button>
                             </form>
-                            {% if mp.torrents_rel_path %}
-                            <form method="post" action="/config/media-paths/{{ mp.id }}/torrents-path" class="mt-1">
-                                <input type="hidden" name="torrents_rel_path" value="">
+                            {% if mp.new_torrent_rel_path %}
+                            <form method="post" action="/config/media-paths/{{ mp.id }}/new-torrent-path" class="mt-1">
+                                <input type="hidden" name="new_torrent_rel_path" value="">
                                 <button type="submit" class="text-xs text-gray-600 hover:underline">Usa quella del disco</button>
                             </form>
                             {% endif %}

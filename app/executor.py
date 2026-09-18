@@ -48,17 +48,29 @@ def execute_candidate(
     media_path = media_item.media_path
     disk = media_path.disk
 
-    torrents_rel_path = media_path.effective_torrents_rel_path
-    if not torrents_rel_path:
+    # scan_root: dove cercare "già in seeding" — SEMPRE l'intera cartella
+    # torrent del disco, mai ristretta alla sottocartella per-libreria: un
+    # client può separare i completed in più sottocartelle che vanno
+    # comunque scansionate tutte, o si generano doppioni/falsi negativi.
+    if not disk.torrents_rel_path:
         raise ExecutionError(f"Disco '{disk.label}' non ha torrents_rel_path configurato")
-
     try:
-        torrents_root = resolve_scoped(disk.root_path, torrents_rel_path)
+        scan_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
+    if not os.path.isdir(scan_root):
+        raise ExecutionError(f"torrents_rel_path non esiste su disco: {scan_root}")
 
-    if not os.path.isdir(torrents_root):
-        raise ExecutionError(f"torrents_rel_path non esiste su disco: {torrents_root}")
+    # target_root: dove creare il NUOVO hardlink e quale save_path dare al
+    # client — la sottocartella per-libreria se configurata, altrimenti la
+    # stessa scan_root (vedi MediaPath.effective_new_torrent_rel_path).
+    target_rel_path = media_path.effective_new_torrent_rel_path
+    try:
+        target_root = resolve_scoped(disk.root_path, target_rel_path)
+    except ScopeViolation as exc:
+        raise ExecutionError(str(exc)) from exc
+    if not os.path.isdir(target_root):
+        raise ExecutionError(f"Cartella di destinazione per i nuovi hardlink non trovata: {target_root}")
 
     file_list = json.loads(candidate.file_list_json) if candidate.file_list_json else []
     video_files = [f for f in file_list if _is_video(f)]
@@ -75,8 +87,12 @@ def execute_candidate(
     # film con un solo file ma una cartella, facendo fallire guessit che
     # cerca un numero di episodio inesistente).
     if len(video_files) > 1:
-        return _execute_season_pack(session, candidate, media_item, disk, torrents_root, video_files, torrent_client_adapter)
-    return _execute_single_file(session, candidate, media_item, disk, torrents_root, video_files[0], torrent_client_adapter)
+        return _execute_season_pack(
+            session, candidate, media_item, disk, scan_root, target_root, video_files, torrent_client_adapter
+        )
+    return _execute_single_file(
+        session, candidate, media_item, disk, scan_root, target_root, video_files[0], torrent_client_adapter
+    )
 
 
 def _execute_single_file(
@@ -84,7 +100,8 @@ def _execute_single_file(
     candidate: Candidate,
     media_item: MediaItem,
     disk: Disk,
-    torrents_root: str,
+    scan_root: str,
+    target_root: str,
     expected_filename: str,
     adapter: TorrentClientAdapter,
 ) -> SeedJob | None:
@@ -92,7 +109,7 @@ def _execute_single_file(
     if not os.path.isfile(source_path):
         raise ExecutionError(f"File locale non trovato: {source_path}")
 
-    existing = _already_seeding(source_path, torrents_root)
+    existing = _already_seeding(source_path, scan_root)
     if existing is not None:
         logger.info("File già in seeding (%s), skip: %s", existing, source_path)
         return None
@@ -103,11 +120,11 @@ def _execute_single_file(
     # torrent.
     relative_target = os.path.join(candidate.folder, expected_filename) if candidate.folder else expected_filename
     try:
-        target_path = resolve_scoped(torrents_root, relative_target)
+        target_path = resolve_scoped(target_root, relative_target)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
-    _check_same_filesystem(source_path, torrents_root)
+    _check_same_filesystem(source_path, target_root)
 
     if os.path.exists(target_path):
         raise ExecutionError(f"Il path di destinazione esiste già: {target_path}")
@@ -118,7 +135,7 @@ def _execute_single_file(
     session.add(seed_job)
     session.commit()
 
-    return _link_and_seed(session, seed_job, adapter, [(source_path, target_path)], candidate, torrents_root)
+    return _link_and_seed(session, seed_job, adapter, [(source_path, target_path)], candidate, target_root)
 
 
 def _execute_season_pack(
@@ -126,7 +143,8 @@ def _execute_season_pack(
     candidate: Candidate,
     media_item: MediaItem,
     disk: Disk,
-    torrents_root: str,
+    scan_root: str,
+    target_root: str,
     video_files: list[str],
     adapter: TorrentClientAdapter,
 ) -> SeedJob | None:
@@ -172,18 +190,18 @@ def _execute_season_pack(
             raise ExecutionError(f"File locale non trovato per episodio {episode}: {item.file_path}")
 
     try:
-        pack_dir = resolve_scoped(torrents_root, candidate.folder)
+        pack_dir = resolve_scoped(target_root, candidate.folder)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
     # "Già in seeding": basta controllare un file rappresentativo del pack.
     any_source = next(iter(local_by_episode.values())).file_path
-    existing = _already_seeding(any_source, torrents_root)
+    existing = _already_seeding(any_source, scan_root)
     if existing is not None:
         logger.info("Pack già in seeding (%s), skip", existing)
         return None
 
-    _check_same_filesystem(any_source, torrents_root)
+    _check_same_filesystem(any_source, target_root)
 
     links: list[tuple[str, str]] = []
     for episode, filename in pack_files_by_episode.items():
@@ -199,7 +217,7 @@ def _execute_season_pack(
     session.add(seed_job)
     session.commit()
 
-    return _link_and_seed(session, seed_job, adapter, links, candidate, torrents_root, hardlink_path=pack_dir)
+    return _link_and_seed(session, seed_job, adapter, links, candidate, target_root, hardlink_path=pack_dir)
 
 
 def _link_and_seed(
@@ -208,7 +226,7 @@ def _link_and_seed(
     adapter: TorrentClientAdapter,
     links: list[tuple[str, str]],
     candidate: Candidate,
-    torrents_root: str,
+    target_root: str,
     hardlink_path: str | None = None,
 ) -> SeedJob:
     if not candidate.download_link:
@@ -229,7 +247,7 @@ def _link_and_seed(
         logger.info("Hardlink creato per candidate %s: %s", candidate.id, seed_job.hardlink_path)
 
         disk = candidate.media_item.media_path.disk
-        client_save_path = _client_visible_path(disk, torrents_root)
+        client_save_path = _client_visible_path(disk, target_root)
         info_hash = adapter.add_torrent(candidate.download_link, save_path=client_save_path, force_recheck=True)
         seed_job.info_hash = info_hash
         seed_job.torrent_added_at = datetime.now(timezone.utc)
@@ -298,16 +316,16 @@ def retry_seed_job(session: Session, seed_job: SeedJob, adapter: TorrentClientAd
 
     media_path = candidate.media_item.media_path
     disk = media_path.disk
-    torrents_rel_path = media_path.effective_torrents_rel_path
-    if not torrents_rel_path:
+    target_rel_path = media_path.effective_new_torrent_rel_path
+    if not target_rel_path:
         raise ExecutionError(f"Disco '{disk.label}' non ha torrents_rel_path configurato")
     try:
-        torrents_root = resolve_scoped(disk.root_path, torrents_rel_path)
+        target_root = resolve_scoped(disk.root_path, target_rel_path)
     except ScopeViolation as exc:
         raise ExecutionError(str(exc)) from exc
 
     try:
-        client_save_path = _client_visible_path(disk, torrents_root)
+        client_save_path = _client_visible_path(disk, target_root)
         info_hash = adapter.add_torrent(candidate.download_link, save_path=client_save_path, force_recheck=True)
         seed_job.info_hash = info_hash
         seed_job.torrent_added_at = datetime.now(timezone.utc)

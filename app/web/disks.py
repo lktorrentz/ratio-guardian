@@ -17,7 +17,7 @@ from app.api.media_paths import (
     MediaPathConflictError,
     MediaPathValidationError,
     create_media_path_row,
-    set_media_path_torrents_path,
+    set_media_path_new_torrent_path,
 )
 from app.deps import get_session
 from app.models import Disk, MediaPath
@@ -145,10 +145,10 @@ def create_media_path_page(
     return RedirectResponse(url=url, status_code=303)
 
 
-@router.post("/media-paths/{media_path_id}/torrents-path")
-def set_media_path_torrents_path_page(
+@router.post("/media-paths/{media_path_id}/new-torrent-path")
+def set_media_path_new_torrent_path_page(
     media_path_id: int,
-    torrents_rel_path: str = Form(""),  # vedi nota in set_torrents_path_page
+    new_torrent_rel_path: str = Form(""),  # vedi nota in set_torrents_path_page
     session: Session = Depends(get_session),
 ):
     mp = session.get(MediaPath, media_path_id)
@@ -156,7 +156,7 @@ def set_media_path_torrents_path_page(
     url = f"/config/disks/{disk_id}" if disk_id else "/config/disks"
     if mp is not None:
         try:
-            set_media_path_torrents_path(session, mp, torrents_rel_path or None)
+            set_media_path_new_torrent_path(session, mp, new_torrent_rel_path or None)
         except MediaPathValidationError as exc:
             url += f"?error={quote(str(exc))}"
     return RedirectResponse(url=url, status_code=303)

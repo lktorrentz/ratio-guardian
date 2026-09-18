@@ -22,13 +22,16 @@ CREATE TABLE IF NOT EXISTS media_path (
     relative_path       TEXT NOT NULL,          -- relativo a disk.root_path
     content_type        TEXT NOT NULL CHECK (content_type IN ('movie','tv')),
     enabled             BOOLEAN NOT NULL DEFAULT 1,
-    torrents_rel_path   TEXT,                   -- opzionale, relativo a disk.root_path (stessa
-                                                 -- convenzione di disk.torrents_rel_path): cartella
-                                                 -- torrent SPECIFICA per questa libreria, per i client
-                                                 -- che separano i completed per categoria (es.
-                                                 -- .../completed/movies). Deve essere disk.torrents_rel_path
-                                                 -- stesso o una sua sottocartella (validato in app) — se
-                                                 -- nullo si usa disk.torrents_rel_path invariato.
+    new_torrent_rel_path TEXT,                  -- opzionale, relativo a disk.root_path (stessa
+                                                 -- convenzione di disk.torrents_rel_path): SOLO dove
+                                                 -- creare un NUOVO hardlink per questa libreria e quale
+                                                 -- save_path comunicare al client, per i client che
+                                                 -- separano i completed per categoria (es.
+                                                 -- .../completed/movies). NON riduce la ricerca "già in
+                                                 -- seeding", che resta sempre su tutta disk.torrents_rel_path.
+                                                 -- Deve essere disk.torrents_rel_path stesso o una sua
+                                                 -- sottocartella (validato in app) — se nullo si usa
+                                                 -- disk.torrents_rel_path invariato.
     UNIQUE(disk_id, relative_path)
 );
 
