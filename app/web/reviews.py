@@ -15,11 +15,11 @@ from sqlalchemy.orm import Session
 
 from app import review as review_service
 from app.deps import get_session
-from app.executor import ExecutionError, find_existing_hardlinks
-from app.fs_scope import ScopeViolation, resolve_scoped
+from app.executor import ExecutionError
 from app.models import Disk, MatchReview, MediaPath, RunLog, SeedJob
 from app.scanner import VIDEO_EXTENSIONS
 from app.season_pack import map_pack_files_by_episode
+from app.seeding_index import build_hardlink_path_index
 from app.web.templates import templates
 
 router = APIRouter()
@@ -49,12 +49,19 @@ def _group_reviews(reviews: list[MatchReview]) -> list[list[MatchReview]]:
     return [groups[key] for key in order]
 
 
-def _file_row(review: MatchReview, video_files: list[str], filename_by_episode: dict[int, str]) -> dict:
+def _file_row(
+    review: MatchReview,
+    video_files: list[str],
+    filename_by_episode: dict[int, str],
+    hardlink_index_cache: dict[int, dict[tuple[int, int], list[str]]],
+) -> dict:
     """Una riga di card per un file del gruppo (un episodio del pack, o
     l'unico file per un film) — path locale, dimensione, dove finirà il
-    NUOVO hardlink, ed eventuali collegamenti già esistenti altrove
-    (find_existing_hardlinks, sola lettura, mai usata per decidere se
-    eseguire davvero)."""
+    NUOVO hardlink, ed eventuali collegamenti già esistenti altrove.
+    L'indice (st_dev, inode) -> path è costruito UNA volta per disco
+    (hardlink_index_cache, popolato da reviews_page) e riusato per ogni
+    riga di quel disco — un os.walk indipendente per ogni file mostrato
+    rendeva la pagina lentissima su una cartella torrent grande."""
     candidate = review.candidate
     media_item = candidate.media_item
     disk = media_item.media_path.disk
@@ -74,13 +81,14 @@ def _file_row(review: MatchReview, video_files: list[str], filename_by_episode: 
         target_path = f"/{new_torrent_rel_path}/{relative}"
 
     existing_links: list[str] = []
-    if disk.torrents_rel_path:
-        try:
-            scan_root = resolve_scoped(disk.root_path, disk.torrents_rel_path)
-        except ScopeViolation:
-            scan_root = None
-        if scan_root and os.path.isdir(scan_root):
-            existing_links = find_existing_hardlinks(media_item.file_path, scan_root)
+    try:
+        source_stat = os.stat(media_item.file_path)
+    except OSError:
+        source_stat = None
+    if source_stat is not None and source_stat.st_nlink > 1:
+        if disk.id not in hardlink_index_cache:
+            hardlink_index_cache[disk.id] = build_hardlink_path_index(disk.root_path, disk.torrents_rel_path)
+        existing_links = hardlink_index_cache[disk.id].get((source_stat.st_dev, source_stat.st_ino), [])
 
     return {
         "file_path": media_item.file_path,
@@ -91,7 +99,9 @@ def _file_row(review: MatchReview, video_files: list[str], filename_by_episode: 
     }
 
 
-def _review_group_view(group: list[MatchReview]) -> dict:
+def _review_group_view(
+    group: list[MatchReview], hardlink_index_cache: dict[int, dict[tuple[int, int], list[str]]]
+) -> dict:
     """Espande un gruppo di review (stesso torrent, vedi _group_reviews)
     con quello che serve a capire, a colpo d'occhio, COSA farà davvero
     un'approvazione — richiesto esplicitamente dopo che non era chiaro
@@ -112,7 +122,7 @@ def _review_group_view(group: list[MatchReview]) -> dict:
         except ValueError:
             filename_by_episode = {}
 
-    files = [_file_row(r, video_files, filename_by_episode) for r in group]
+    files = [_file_row(r, video_files, filename_by_episode, hardlink_index_cache) for r in group]
 
     # Ogni review del gruppo ha la propria confidence (calcolata sul
     # confronto per-episodio dentro il pack, non su un unico valore
@@ -157,7 +167,8 @@ def reviews_page(request: Request, session: Session = Depends(get_session)):
     reviews = review_service.list_ready_for_review(session)
     groups = _group_reviews(reviews)
     groups.sort(key=lambda g: min(r.candidate.confidence for r in g), reverse=True)
-    review_views = [_review_group_view(g) for g in groups]
+    hardlink_index_cache: dict[int, dict[tuple[int, int], list[str]]] = {}
+    review_views = [_review_group_view(g, hardlink_index_cache) for g in groups]
     failed_seed_jobs = review_service.list_failed_seed_jobs(session)
     last_run = (
         session.query(RunLog)

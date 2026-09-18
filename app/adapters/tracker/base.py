@@ -190,18 +190,63 @@ class Unit3dTrackerAdapter(TrackerAdapter):
     def _to_candidate(self, item: dict) -> TorrentCandidate:
         attrs = item["attributes"]
         files = attrs.get("files") or []
+        folder, file_list, file_sizes = self._normalize_pack_structure(attrs.get("folder"), files, attrs["name"])
         return TorrentCandidate(
             torrent_id_remote=str(item["id"]),
             info_hash=None,
             name=attrs["name"],
             size_bytes=attrs["size"],
-            file_list=[f["name"] for f in files],
+            file_list=file_list,
             mediainfo_unique_id=self._extract_unique_id(attrs.get("media_info")),
-            folder=attrs.get("folder"),
+            folder=folder,
             download_link=attrs.get("download_link"),
-            file_sizes={f["name"]: f["size"] for f in files if "size" in f},
+            file_sizes=file_sizes,
             mediainfo_unique_ids_by_filename=self._extract_unique_ids_by_filename(attrs.get("media_info")),
         )
+
+    @staticmethod
+    def _normalize_pack_structure(
+        raw_folder: str | None, files: list[dict], torrent_name: str
+    ) -> tuple[str | None, list[str], dict[str, int]]:
+        """Determina la cartella del pack e normalizza file_list/file_sizes
+        a nomi nudi — il resto del motore (matching, esecutore) assume
+        SEMPRE folder e nome file separati, mai un path già annidato
+        dentro file_list.
+
+        Alcune istanze UNIT3D riportano il path relativo già dentro
+        files[].name (es. "Release.Name/Show.S01E02.mkv") invece che nella
+        sola attributes.folder: se tutti i file condividono lo stesso
+        primo componente di path, quella è la cartella vera — va tolta dal
+        nome e MAI anche aggiunta separatamente (altrimenti si otterrebbe
+        un path raddoppiato all'esecuzione). Se invece i nomi sono già
+        nudi e attributes.folder non è popolato ma ci sono più file, un
+        torrent multi-file BitTorrent ha comunque quasi sempre una
+        cartella radice che di norma coincide con il nome della release —
+        mai applicato per un file singolo, dove una cartella non è
+        scontata (osservato: era il motivo per cui alcuni season pack
+        finivano senza cartella nel path di destinazione, con l'API che
+        non popolava affatto "folder" per quel torrent)."""
+        names = [f["name"] for f in files]
+
+        embedded_folder = None
+        if names and all("/" in name for name in names):
+            first_components = {name.split("/", 1)[0] for name in names}
+            if len(first_components) == 1:
+                embedded_folder = next(iter(first_components))
+
+        if embedded_folder:
+            prefix = embedded_folder + "/"
+            stripped_names = [name[len(prefix):] if name.startswith(prefix) else name for name in names]
+            file_sizes = {
+                (f["name"][len(prefix):] if f["name"].startswith(prefix) else f["name"]): f["size"]
+                for f in files
+                if "size" in f
+            }
+            return embedded_folder, stripped_names, file_sizes
+
+        folder = raw_folder or (torrent_name if len(names) > 1 else None)
+        file_sizes = {f["name"]: f["size"] for f in files if "size" in f}
+        return folder, names, file_sizes
 
     @classmethod
     def _extract_unique_id(cls, media_info: str | None) -> str | None:
